@@ -524,6 +524,12 @@ async def send_auto_payment_alert(user_id: int, amount: float, new_bal: float, r
 
 
 class ResellerApiAndPaymentServer(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        # Handles UptimeRobot and keep-alive pingers without 501 error
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
