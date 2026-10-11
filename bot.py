@@ -29,7 +29,7 @@ from telegram.ext import (
 )
 
 # ----------------- CONFIGURATION ----------------- #
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8890162845:AAEURGmnmA5HwvFRY6gtqpWLiPV0UIgbWrU")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8655496659:AAEEV-VbJDQpXfVUhHQWvzedzeM0BHL9RGM")
 BOT_NAME = "Trick By Store"
 
 # Only primary admin active
