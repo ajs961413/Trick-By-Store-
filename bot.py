@@ -32,7 +32,6 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8655496659:AAEEV-VbJDQpXfVUhHQWvzedzeM0BHL9RGM")
 BOT_NAME = "Trick By Store"
 
-# Only primary admin active
 ADMIN_IDS = [1136742030]
 
 CHANNEL_USERNAME = "@trickbylo0t"
@@ -47,7 +46,6 @@ MIN_DEPOSIT_INR = 1.0
 MIN_DEPOSIT_USDT = 0.05
 USDT_RATE_INR = 100.0
 
-# Direct Merchant VPA for zero-redirect scanner
 MERCHANT_VPA = "malprakash1@bpunity"
 
 # SMB Gateway Credentials
@@ -95,7 +93,6 @@ def init_db():
         )
     """)
 
-    # Safe column migration
     cursor.execute("PRAGMA table_info(users)")
     existing_cols = [row[1] for row in cursor.fetchall()]
     if "api_key" not in existing_cols:
@@ -382,7 +379,7 @@ async def create_smb_order(user_id: int, user_name: str, amount: float, currency
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(SMB_CREATE_ORDER_URL, headers=headers, json=payload)
             data = resp.json()
-            if resp.status_code in [200, 201] and data.get("status") == "success":
+            if resp.status_code in [200, 201] and (data.get("status") in ["success", True] or data.get("success") is True):
                 order_data = data.get("data", {})
                 return True, unique_order_id, order_data
             else:
@@ -404,8 +401,10 @@ async def check_smb_order_status(order_id: str):
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(SMB_CHECK_STATUS_URL, headers=headers, json=payload)
             data = resp.json()
-            if resp.status_code == 200 and data.get("status") == "success":
-                return True, data.get("data", {})
+            status_field = str(data.get("status", "")).lower()
+            if resp.status_code == 200 and (status_field in ["success", "true"] or data.get("success") is True):
+                res_data = data.get("data", {})
+                return True, res_data
             return False, data.get("message", "Check failed")
     except Exception as e:
         logger.error(f"SMB Status Check Failed: {e}")
@@ -525,7 +524,6 @@ async def send_auto_payment_alert(user_id: int, amount: float, new_bal: float, r
 
 class ResellerApiAndPaymentServer(BaseHTTPRequestHandler):
     def do_HEAD(self):
-        # Handles UptimeRobot and keep-alive pingers without 501 error
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -599,7 +597,8 @@ class ResellerApiAndPaymentServer(BaseHTTPRequestHandler):
             amt = float(payload.get("amount") or payload.get("data", {}).get("amount", 0.0))
             status = str(payload.get("status") or payload.get("data", {}).get("status", "")).lower()
 
-            if "TBS_" in order_id and status in ["success", "paid"]:
+            valid_statuses = ["success", "paid", "completed", "txn_success"]
+            if "TBS_" in order_id and status in valid_statuses:
                 u_id = int(order_id.split("_")[1])
                 ok, new_bal = record_auto_gateway_payment(order_id, u_id, amt)
                 if ok and loop_instance and loop_instance.is_running():
@@ -877,6 +876,8 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
     interval = 4
     elapsed = 0
 
+    valid_statuses = ["success", "paid", "completed", "txn_success"]
+
     while elapsed < poll_duration:
         if not ACTIVE_PAYMENT_POLLS.get(order_id, False):
             break
@@ -885,54 +886,58 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
         elapsed += interval
 
         ok, res_data = await check_smb_order_status(order_id)
-        if ok and res_data.get("status") in ["success", "paid"]:
-            ACTIVE_PAYMENT_POLLS.pop(order_id, None)
-            utr = res_data.get("utr", order_id)
+        if ok:
+            st = str(res_data.get("status", "")).lower()
+            if st in valid_statuses:
+                ACTIVE_PAYMENT_POLLS.pop(order_id, None)
+                utr = res_data.get("utr") or res_data.get("bank_ref") or order_id
 
-            if prod_id and qty:
-                add_user_balance(user_id, amount)
-                p_ok, p_res = purchase_with_balance(user_id, prod_id, qty)
-                if p_ok:
-                    raw, o_id, total, name, quantity = p_res
-                    items = "\n".join([f"<code>{x}</code>" for x in raw])
-                    msg = (
-                        "🎉 <b>PAYMENT DETECTED & DELIVERED!</b>\n"
+                if prod_id and qty:
+                    rec_ok, _ = record_auto_gateway_payment(utr, user_id, amount)
+                    if rec_ok:
+                        p_ok, p_res = purchase_with_balance(user_id, prod_id, qty)
+                        if p_ok:
+                            raw, o_id, total, name, quantity = p_res
+                            items = "\n".join([f"<code>{x}</code>" for x in raw])
+                            msg = (
+                                "🎉 <b>PAYMENT DETECTED & DELIVERED!</b>\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🆔 <b>Order ID:</b> <code>#{o_id}</code>\n"
+                                f"📦 <b>Product:</b> {name}\n"
+                                f"🔢 <b>Quantity:</b> <code>{quantity} unit(s)</code>\n"
+                                f"💵 <b>Paid:</b> <code>{CURRENCY_SYMBOL}{total:.2f}</code>\n"
+                                f"🔖 <b>Bank Ref/UTR:</b> <code>{utr}</code>\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🔑 <b>Delivered Credentials:</b>\n\n{items}\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "💡 <i>Tap any credential above to copy it instantly.</i>"
+                            )
+                            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Continue Shopping 🟢", callback_data="back_to_menu")]])
+                            try:
+                                await context.bot.delete_message(chat_id=user_id, message_id=message_id)
+                            except Exception:
+                                pass
+                            await context.bot.send_message(chat_id=user_id, text=msg, reply_markup=markup, parse_mode="HTML")
+                            return
+
+                rec_ok, new_bal = record_auto_gateway_payment(utr, user_id, amount)
+                if rec_ok:
+                    succ_msg = (
+                        "✅ <b>PAYMENT RECEIVED & VERIFIED!</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🆔 <b>Order ID:</b> <code>#{o_id}</code>\n"
-                        f"📦 <b>Product:</b> {name}\n"
-                        f"🔢 <b>Quantity:</b> <code>{quantity} unit(s)</code>\n"
-                        f"💵 <b>Paid:</b> <code>{CURRENCY_SYMBOL}{total:.2f}</code>\n"
-                        f"🔖 <b>Bank Ref/UTR:</b> <code>{utr}</code>\n"
+                        f"💵 <b>Amount Credited:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
+                        f"💼 <b>Updated Wallet:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
+                        f"🆔 <b>Verified Ref/UTR:</b> <code>{utr}</code>\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🔑 <b>Delivered Credentials:</b>\n\n{items}\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "💡 <i>Tap any credential above to copy it instantly.</i>"
+                        "🎉 <i>Your funds are ready! Start ordering now.</i>"
                     )
-                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Continue Shopping 🟢", callback_data="back_to_menu")]])
+                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Browse Store 🟢", callback_data="back_to_menu")]])
                     try:
                         await context.bot.delete_message(chat_id=user_id, message_id=message_id)
                     except Exception:
                         pass
-                    await context.bot.send_message(chat_id=user_id, text=msg, reply_markup=markup, parse_mode="HTML")
-                    return
-
-            rec_ok, new_bal = record_auto_gateway_payment(utr, user_id, amount)
-            succ_msg = (
-                "✅ <b>PAYMENT RECEIVED & VERIFIED!</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💵 <b>Amount Credited:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
-                f"💼 <b>Updated Wallet:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
-                f"🆔 <b>Verified Ref/UTR:</b> <code>{utr}</code>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🎉 <i>Your funds are ready! Start ordering now.</i>"
-            )
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Browse Store 🟢", callback_data="back_to_menu")]])
-            try:
-                await context.bot.delete_message(chat_id=user_id, message_id=message_id)
-            except Exception:
-                pass
-            await context.bot.send_message(chat_id=user_id, text=succ_msg, reply_markup=markup, parse_mode="HTML")
-            return
+                    await context.bot.send_message(chat_id=user_id, text=succ_msg, reply_markup=markup, parse_mode="HTML")
+                return
 
     ACTIVE_PAYMENT_POLLS.pop(order_id, None)
 
@@ -956,8 +961,15 @@ async def generate_and_send_upi_payment(user_id: int, user_name: str, amount: fl
             await context.bot.send_message(chat_id=user_id, text=err_text, reply_markup=markup, parse_mode="HTML")
         return
 
-    upi_intent_string = f"upi://pay?pa={MERCHANT_VPA}&pn={urllib.parse.quote(BOT_NAME)}&am={amount:.2f}&cu=INR&tr={order_id}&tn={order_id}"
-    qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=350x350&data={urllib.parse.quote(upi_intent_string)}"
+    gateway_intent = res_data.get("intent_url") or res_data.get("upi_intent")
+    payment_link = res_data.get("payment_url") or res_data.get("checkout_url")
+
+    if gateway_intent:
+        upi_string = gateway_intent
+    else:
+        upi_string = f"upi://pay?pa={MERCHANT_VPA}&pn={urllib.parse.quote(BOT_NAME)}&am={amount:.2f}&cu=INR&tr={order_id}&tn={order_id}"
+
+    qr_img = res_data.get("qr_code") or res_data.get("qr_image") or f"https://api.qrserver.com/v1/create-qr-code/?size=350x350&data={urllib.parse.quote(upi_string)}"
 
     cap = (
         f"⚡ <b>SCAN & PAY VIA ANY UPI APP</b>\n"
@@ -972,9 +984,11 @@ async def generate_and_send_upi_payment(user_id: int, user_name: str, amount: fl
         "🔄 <i>Auto-detecting payment status in real-time...</i>"
     )
 
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("❌ Cancel / Back", callback_data=f"cancel_order_{order_id}")],
-    ])
+    buttons = []
+    if payment_link:
+        buttons.append([InlineKeyboardButton("🌐 Open Payment Page", url=payment_link)])
+    buttons.append([InlineKeyboardButton("❌ Cancel / Back", callback_data=f"cancel_order_{order_id}")])
+    markup = InlineKeyboardMarkup(buttons)
 
     if wait_msg:
         try:
@@ -999,7 +1013,8 @@ async def generate_and_send_usdt_payment(user_id: int, user_name: str, usdt_amou
     ok, order_id, res_data = await create_smb_order(user_id, user_name, usdt_amount, currency="USDT", prod_id=prod_id, qty=qty)
     inr_equiv = usdt_amount * USDT_RATE_INR
 
-    qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=350x350&data={USDT_WALLET_ADDRESS}"
+    crypto_payment_url = res_data.get("payment_url") or res_data.get("checkout_url")
+    crypto_qr = res_data.get("qr_code") or res_data.get("qr_image") or f"https://api.qrserver.com/v1/create-qr-code/?size=350x350&data={USDT_WALLET_ADDRESS}"
 
     cap = (
         f"💎 <b>USDT (TRC-20) / BINANCE PAY QR</b>\n"
@@ -1015,9 +1030,11 @@ async def generate_and_send_usdt_payment(user_id: int, user_name: str, usdt_amou
         "🔄 <i>Auto-detecting payment status in real-time...</i>"
     )
 
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("❌ Cancel / Back", callback_data=f"cancel_order_{order_id}")],
-    ])
+    buttons = []
+    if crypto_payment_url:
+        buttons.append([InlineKeyboardButton("🚀 Pay via Binance Pay / Gateway", url=crypto_payment_url)])
+    buttons.append([InlineKeyboardButton("❌ Cancel / Back", callback_data=f"cancel_order_{order_id}")])
+    markup = InlineKeyboardMarkup(buttons)
 
     if wait_msg:
         try:
@@ -1025,7 +1042,7 @@ async def generate_and_send_usdt_payment(user_id: int, user_name: str, usdt_amou
         except Exception:
             pass
 
-    sent_msg = await context.bot.send_photo(chat_id=user_id, photo=qr_img, caption=cap, reply_markup=markup, parse_mode="HTML")
+    sent_msg = await context.bot.send_photo(chat_id=user_id, photo=crypto_qr, caption=cap, reply_markup=markup, parse_mode="HTML")
 
     ACTIVE_PAYMENT_POLLS[order_id] = True
     asyncio.create_task(auto_poll_payment_status(order_id, user_id, inr_equiv, sent_msg.message_id, context, prod_id, qty))
@@ -1185,7 +1202,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Please enter a valid number (e.g. 0.05, 1).")
             return
 
-    # ADMIN: Continuous Step 1 - Gmail Address Validation & Input
+    # ADMIN: Gmail Step 1
     if context.user_data.get("adm_flow") == "gmail_step_email":
         email_candidate = text.strip()
         if not email_candidate.lower().endswith("@gmail.com"):
@@ -1214,7 +1231,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ADMIN: Continuous Step 2 - Password Input & Save
+    # ADMIN: Gmail Step 2
     if context.user_data.get("adm_flow") == "gmail_step_password":
         pwd = text.strip()
         gmail_addr = context.user_data.get("temp_gmail")
@@ -1226,7 +1243,6 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_added = context.user_data.get("session_added_count", 0) + 1
         context.user_data["session_added_count"] = session_added
 
-        # Reset for the next Gmail in loop
         context.user_data["adm_flow"] = "gmail_step_email"
         context.user_data.pop("temp_gmail", None)
 
@@ -1245,7 +1261,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ADMIN: Continuous Gemini Link Input Loop
+    # ADMIN: Gemini Link Input Loop
     if context.user_data.get("adm_flow") == "gemini_step_link":
         raw_lines = text.splitlines()
         added_count = add_bulk_stock(2, raw_lines)
@@ -1457,7 +1473,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             req_usdt = (prod[2] * int(p[2])) / USDT_RATE_INR
             await generate_and_send_usdt_payment(user.id, user.first_name, req_usdt, context, previous_message=q.message, prod_id=int(p[1]), qty=int(p[2]))
 
-    # Admin Panel Actions
+    # Admin Actions
     elif data in ["adm_back_dash", "adm_refresh_stats"]:
         if user.id not in ADMIN_IDS:
             return
@@ -1604,3 +1620,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+2
