@@ -32,8 +32,8 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8655496659:AAEEV-VbJDQpXfVUhHQWvzedzeM0BHL9RGM")
 BOT_NAME = "Trick By Store"
 
-# Admin IDs
-ADMIN_IDS = [1136742030, 8095355810]
+# Admin IDs (User ID 8383343412 added here)
+ADMIN_IDS = [1136742030, 8095355810, 8383343412]
 
 CHANNEL_USERNAME = "@trickbylo0t"
 CHANNEL_URL = "https://t.me/trickbylo0t"
