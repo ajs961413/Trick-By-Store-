@@ -32,7 +32,7 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8655496659:AAEEV-VbJDQpXfVUhHQWvzedzeM0BHL9RGM")
 BOT_NAME = "Trick By Store"
 
-# শুধুমাত্র আপনার নির্দিষ্ট অ্যাডমিন আইডি
+# শুধুমাত্র আপনার অ্যাডমিন আইডি
 ADMIN_IDS = [1136742030]
 
 CHANNEL_USERNAME = "@trickbylo0t"
@@ -42,7 +42,6 @@ SUPPORT_USERNAME = "TrickBy_Support"
 CURRENCY_SYMBOL = "₹"
 DB_PATH = "shop_bot.db"
 
-# ডিপোজিট লিমিট
 MIN_DEPOSIT_INR = 1.0
 MIN_DEPOSIT_USDT = 0.05
 USDT_RATE_INR = 100.0
@@ -58,7 +57,7 @@ SMB_CHECK_STATUS_URL = "https://smbupi.com/api/check-status"
 USDT_WALLET_ADDRESS = "TNtuYDZGzgayG74ZKXTMGZ7h1c9HwzenY6"
 
 USER_LAST_CLICK = {}
-COOLDOWN_SECONDS = 1.2
+COOLDOWN_SECONDS = 1.0
 ACTIVE_PAYMENT_POLLS = {}
 
 logging.basicConfig(
@@ -73,7 +72,7 @@ loop_instance = None
 
 # ----------------- DATABASE HELPERS ----------------- #
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=20.0)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
@@ -135,7 +134,6 @@ def init_db():
         )
     """)
 
-    # ডিফল্ট প্রোডাক্ট (যদি টেবিল খালি থাকে)
     cursor.execute("SELECT COUNT(*) FROM products")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO products (product_id, name, price, description) VALUES (1, ?, ?, ?)",
@@ -235,17 +233,12 @@ def get_available_stock_count(product_id: int) -> int:
     return row[0] if row else 0
 
 
-def add_bulk_stock(product_id: int, items_list: list) -> int:
-    clean_items = [x.strip() for x in items_list if x.strip()]
-    if not clean_items:
-        return 0
+def add_single_item_stock(product_id: int, formatted_item: str):
     conn = get_db_connection()
     c = conn.cursor()
-    c.executemany("INSERT INTO inventory (product_id, item_data) VALUES (?, ?)", [(product_id, itm) for itm in clean_items])
+    c.execute("INSERT INTO inventory (product_id, item_data) VALUES (?, ?)", (product_id, formatted_item))
     conn.commit()
-    cnt = c.rowcount
     conn.close()
-    return cnt
 
 
 def clear_unsold_stock(product_id: int) -> int:
@@ -271,26 +264,26 @@ def get_admin_dashboard_stats():
     conn = get_db_connection()
     c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
-    
+
     c.execute("SELECT COALESCE(SUM(price_paid), 0.0) FROM orders")
     t_rev = c.fetchone()[0]
     c.execute("SELECT COALESCE(SUM(price_paid), 0.0) FROM orders WHERE date(created_at) = date(?)", (today,))
     td_rev = c.fetchone()[0]
-    
+
     c.execute("SELECT COALESCE(SUM(quantity), 0) FROM orders")
     t_sold = c.fetchone()[0]
     c.execute("SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE date(created_at) = date(?)", (today,))
     td_sold = c.fetchone()[0]
-    
+
     c.execute("SELECT COUNT(*) FROM inventory WHERE is_sold = 0")
     total_stock = c.fetchone()[0]
-    
+
     c.execute("SELECT COUNT(*) FROM users")
     users = c.fetchone()[0]
-    
+
     c.execute("SELECT COALESCE(SUM(amount_credited), 0.0) FROM processed_payments")
     total_credited = c.fetchone()[0]
-    
+
     conn.close()
     return {
         "t_rev": t_rev,
@@ -311,6 +304,7 @@ def purchase_with_balance(user_id: int, product_id: int, quantity: int = 1):
     conn = get_db_connection()
     c = conn.cursor()
     try:
+        # অ্যান্টি-ফ্রড এবং ডাবল স্পেন্ডিং প্রতিরোধ
         c.execute("BEGIN IMMEDIATE")
         c.execute("SELECT price, name FROM products WHERE product_id = ?", (product_id,))
         prod = c.fetchone()
@@ -346,7 +340,7 @@ def purchase_with_balance(user_id: int, product_id: int, quantity: int = 1):
         c.execute("UPDATE users SET balance = balance - ? WHERE user_id = ?", (total, user_id))
         c.execute(
             "INSERT INTO orders (user_id, product_id, quantity, delivered_data, price_paid) VALUES (?, ?, ?, ?, ?)",
-            (user_id, product_id, quantity, "\n".join(raw), total),
+            (user_id, product_id, quantity, "\n---ITEM---\n".join(raw), total),
         )
         order_id = c.lastrowid
         conn.commit()
@@ -373,6 +367,26 @@ def get_user_orders(user_id: int):
     rows = c.fetchall()
     conn.close()
     return rows
+
+
+# ----------------- CREDENTIAL FORMATTER (PREMIUM LOOK) ----------------- #
+def format_credentials_card(raw_items):
+    formatted_list = []
+    for idx, item in enumerate(raw_items, 1):
+        if "||" in item:
+            acc, pwd = item.split("||", 1)
+            card = (
+                f"<b># Account [{idx}]:</b>\n"
+                f"📧 <b>Email/User:</b> <code>{acc.strip()}</code>\n"
+                f"🔑 <b>Password:</b> <code>{pwd.strip()}</code>"
+            )
+        else:
+            card = (
+                f"<b># Item [{idx}]:</b>\n"
+                f"<code>{item.strip()}</code>"
+            )
+        formatted_list.append(card)
+    return "\n\n".join(formatted_list)
 
 
 # ----------------- SMB UPI GATEWAY ----------------- #
@@ -429,7 +443,6 @@ async def check_smb_order_status(order_id: str):
         return False, str(e)
 
 
-# ----------------- GUARDS & CHANNEL CHECK ----------------- #
 def is_rate_limited(user_id: int) -> bool:
     now = time.time()
     last_time = USER_LAST_CLICK.get(user_id, 0)
@@ -456,11 +469,11 @@ def get_force_join_card(user_first_name: str):
     text = (
         "🔒 <b>SECURITY VERIFICATION REQUIRED</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Hello <b>{html.escape(user_first_name or '')}</b>,\n\n"
-        "To access our services and products, please join our official Telegram channel.\n\n"
-        f"📢 <b>Channel:</b> {CHANNEL_USERNAME}\n"
+        f"স্বাগতম <b>{html.escape(user_first_name or '')}</b>,\n\n"
+        "বটের প্রিমিয়াম সার্ভিসগুলো ব্যবহার করার জন্য আমাদের অফিসিয়াল টেলিগ্রাম চ্যানেলে জয়েন করুন।\n\n"
+        f"📢 <b>Official Channel:</b> {CHANNEL_USERNAME}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Click below to join, then tap 'Verify & Unlock Bot' to continue!</i>"
+        "<i>নিচে জয়েন করে 'Verify & Unlock Bot' বাটনে চাপ দিন।</i>"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📢 Join Official Channel", url=CHANNEL_URL)],
@@ -500,12 +513,12 @@ async def send_auto_payment_alert(user_id: int, amount: float, new_bal: float, r
         return
     text = (
         "✅ <b>PAYMENT VERIFIED SUCCESSFULLY!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Amount Credited:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
         f"💼 <b>Updated Wallet:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
         f"🆔 <b>Ref/UTR:</b> <code>{ref_id}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎉 <i>Your funds are ready! Start ordering now.</i>"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎉 <i>আপনার ব্যালেন্স যুক্ত হয়েছে! এখনই প্রোডাক্ট অর্ডার করতে পারেন।</i>"
     )
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Buy Products 🟢", callback_data="back_to_menu")]])
     try:
@@ -615,7 +628,7 @@ def run_http_server():
     server.serve_forever()
 
 
-# ----------------- UI KEYBOARDS ----------------- #
+# ----------------- KEYBOARDS ----------------- #
 def get_main_reply_keyboard():
     return ReplyKeyboardMarkup(
         [
@@ -708,7 +721,7 @@ def build_admin_dashboard_text_and_markup():
     stock_breakdown = ""
     for p in prods:
         c = get_available_stock_count(p[0])
-        stock_breakdown += f"• {p[1]}: <code>{c} Units</code>\n"
+        stock_breakdown += f"• <b>{p[1]}:</b> <code>{c} Units</code>\n"
 
     text = (
         "👑 <b>ADMIN EXECUTIVE COMMAND CENTER</b>\n"
@@ -716,13 +729,13 @@ def build_admin_dashboard_text_and_markup():
         f"📅 <b>Date:</b> <code>{s['today_date']}</code>\n"
         f"👥 <b>Total Users:</b> <code>{s['users']} Members</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📦 <b>INVENTORY SUMMARY</b>\n"
+        "📦 <b>LIVE INVENTORY STATUS</b>\n"
         f"{stock_breakdown or '• No active products yet\n'}"
-        f"🧊 Total Available Stock: <code>{s['total_stock']} Units</code>\n"
+        f"🧊 <b>Total In-Stock:</b> <code>{s['total_stock']} Units</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📈 <b>SALES & REVENUE OVERVIEW</b>\n"
-        f"⚡ <b>Today's Sales:</b> <code>{s['td_sold']} Units</code>\n"
-        f"💵 <b>Today's Revenue:</b> <code>{CURRENCY_SYMBOL}{s['td_rev']:.2f}</code>\n"
+        f"⚡ <b>Today Sales:</b> <code>{s['td_sold']} Units</code>\n"
+        f"💵 <b>Today Revenue:</b> <code>{CURRENCY_SYMBOL}{s['td_rev']:.2f}</code>\n"
         f"📦 <b>All-Time Sold:</b> <code>{s['t_sold']} Units</code>\n"
         f"💰 <b>All-Time Revenue:</b> <code>{CURRENCY_SYMBOL}{s['t_rev']:.2f}</code>\n"
         f"💎 <b>Gateway Deposits:</b> <code>{CURRENCY_SYMBOL}{s['total_credited']:.2f}</code>\n"
@@ -730,11 +743,11 @@ def build_admin_dashboard_text_and_markup():
     )
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➕ Add New Service", callback_data="adm_create_product"),
-            InlineKeyboardButton("❌ Delete Service", callback_data="adm_delete_product_menu"),
+            InlineKeyboardButton("➕ Add New Product", callback_data="adm_create_product"),
+            InlineKeyboardButton("❌ Delete Product", callback_data="adm_delete_product_menu"),
         ],
         [
-            InlineKeyboardButton("📦 Add Stock (Items)", callback_data="adm_stock_menu"),
+            InlineKeyboardButton("📥 Add Stock (1-by-1)", callback_data="adm_stock_menu"),
             InlineKeyboardButton("🗑️ Clear Unsold Stock", callback_data="adm_rm_menu"),
         ],
         [
@@ -742,7 +755,7 @@ def build_admin_dashboard_text_and_markup():
             InlineKeyboardButton("📊 Refresh Analytics", callback_data="adm_refresh_stats"),
         ],
         [
-            InlineKeyboardButton("❌ Close Admin Panel", callback_data="adm_close"),
+            InlineKeyboardButton("❌ Close Panel", callback_data="adm_close"),
         ],
     ])
     return text, markup
@@ -767,12 +780,12 @@ async def render_wallet_view(update: Update, context: ContextTypes.DEFAULT_TYPE,
     bal = get_user_balance(user_id)
     text = (
         "💰 <b>My Wallet Dashboard</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>INR Balance:</b> ≈ <code>{CURRENCY_SYMBOL}{bal:.2f}</code>\n"
         f"💎 <b>USDT Balance:</b> <code>{bal/USDT_RATE_INR:.4f} USDT</code>\n"
-        f"💱 <i>Live Exchange: 1 USDT = {CURRENCY_SYMBOL}{USDT_RATE_INR:.2f}</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ <i>Instant automated deposits (Auto-detects payment in 3-5 seconds)</i>"
+        f"💱 <i>Live Rate: 1 USDT = {CURRENCY_SYMBOL}{USDT_RATE_INR:.2f}</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚡ <i>অটোমেটেড ডিপোজিট (পেমেন্ট করার ৩-৫ সেকেন্ডে ব্যালেন্স যুক্ত হয়)</i>"
     )
     await send_or_edit_menu(update, context, text, get_wallet_inline_keyboard())
 
@@ -783,8 +796,8 @@ async def render_api_view(update: Update, context: ContextTypes.DEFAULT_TYPE, us
     api_doc = (
         "🤖 <b>DEVELOPER & RESELLER API</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚡ <i>Automate and resell stock directly via your website or Telegram Bot!</i>\n\n"
-        f"🔑 <b>Your Secret API Key:</b>\n<code>{api_key}</code>\n\n"
+        "⚡ <i>ওয়েবসাইট বা বটের মাধ্যমে স্টক অটোমেশন করতে এপিআই ব্যবহার করুন:</i>\n\n"
+        f"🔑 <b>Secret API Key:</b>\n<code>{api_key}</code>\n\n"
         f"💼 <b>API Available Balance:</b> <code>{CURRENCY_SYMBOL}{bal:.2f}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 <b>Order Endpoint:</b>\n"
@@ -796,8 +809,7 @@ async def render_api_view(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         f'  "api_key": "{api_key}",\n'
         '  "product_id": 1,\n'
         '  "quantity": 1\n'
-        "}</code>\n\n"
-        "💡 <i>Orders deduct directly from wallet balance and return instant credentials.</i>"
+        "}</code>"
     )
     markup = InlineKeyboardMarkup([
         [
@@ -811,14 +823,14 @@ async def render_api_view(update: Update, context: ContextTypes.DEFAULT_TYPE, us
 
 async def render_recovery_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rec_text = (
-        "🛡️ <b>ACCOUNT RECOVERY & SAFETY POLICY</b>\n"
+        "🛡️ <b>ACCOUNT SAFETY & WARRANTY POLICY</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<b>1. Quality Assurance:</b>\n"
-        "• All digital products sold are 100% fresh and clean.\n\n"
-        "<b>2. Immediate Setup:</b>\n"
-        "• Check and secure your purchased accounts or links immediately.\n\n"
-        "<b>3. Replacement Warranty:</b>\n"
-        "• Replacement guarantee applicable per product guidelines."
+        "<b>1. শতভাগ ফ্রেশ সার্ভিস:</b>\n"
+        "• সব অ্যাকাউন্ট ফ্রেশ এবং সক্রিয় অবস্থায় ডেলিভারি দেওয়া হয়।\n\n"
+        "<b>2. সাথে সাথে করণীয়:</b>\n"
+        "• ডেলিভারি পাওয়ার পর অবিলম্বে পাসওয়ার্ড ও রিকভারি তথ্য পরিবর্তন করুন।\n\n"
+        "<b>3. ওয়ারেন্টি নীতি:</b>\n"
+        "• লগইন বা অ্যাক্টিভেশনে কোনো ত্রুটি থাকলে সাপোর্টে মেসেজ দিন।"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 Contact Support", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -829,17 +841,16 @@ async def render_recovery_view(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def render_support_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sup_text = (
-        "💬 <b>CUSTOMER SUPPORT & HELP CENTER</b>\n"
+        "💬 <b>24/7 CUSTOMER SUPPORT & HELP</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Have questions about deposits, deliveries, or custom orders?\n\n"
-        "🕒 <b>Support Hours:</b> 24/7 Available\n"
+        "ডিপোজিট, ডেলিভারি বা যেকোনো প্রয়োজনে সরাসরি সাপোর্টে যোগাযোগ করুন:\n\n"
         f"📢 <b>Official Channel:</b> {CHANNEL_USERNAME}\n"
         f"👤 <b>Live Admin Support:</b> @{SUPPORT_USERNAME}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("👤 Contact Live Admin", url=f"https://t.me/{SUPPORT_USERNAME}")],
-        [InlineKeyboardButton("📢 Join Updates Channel", url=CHANNEL_URL)],
+        [InlineKeyboardButton("📢 Join Channel", url=CHANNEL_URL)],
         [InlineKeyboardButton("🔵 🔙 Back to Store 🔵", callback_data="back_to_menu")],
     ])
     await send_or_edit_menu(update, context, sup_text, markup)
@@ -850,37 +861,38 @@ async def render_orders_view(update: Update, context: ContextTypes.DEFAULT_TYPE,
     if not ords:
         empty_text = (
             "📦 <b>ORDER HISTORY</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "<i>You haven't placed any orders yet.</i>\n\n"
-            "Your purchased digital products and credentials will be permanently saved and displayed here."
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>আপনার কোনো পূর্বের অর্ডার পাওয়া যায়নি।</i>\n\n"
+            "প্রোডাক্ট কিনলে ডেলিভারি হওয়া তথ্যগুলো আজীবনের জন্য এখানে সেভ থাকবে।"
         )
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Browse Store 🟢", callback_data="back_to_menu")]])
         await send_or_edit_menu(update, context, empty_text, markup)
         return
 
-    out = "📦 <b>YOUR RECENT DELIVERIES:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    out = "📦 <b>YOUR RECENT DELIVERIES</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     for o_id, name, q, price, data, date in ords:
+        items = data.split("\n---ITEM---\n")
+        formatted = format_credentials_card(items)
         out += (
             f"🆔 <b>Order #{o_id}</b> ({date[:16]})\n"
-            f"📦 <b>Product:</b> {name} (x{q})\n"
-            f"💵 <b>Paid:</b> {CURRENCY_SYMBOL}{price:.2f}\n"
-            f"🔑 <b>Credentials:</b>\n<code>{data}</code>\n"
-            "──────────────────────\n"
+            f"📦 <b>Service:</b> {name} (x{q})\n"
+            f"💵 <b>Price Paid:</b> {CURRENCY_SYMBOL}{price:.2f}\n"
+            f"🔐 <b>Delivered Data:</b>\n{formatted}\n"
+            "──────────────────────────\n\n"
         )
-    out += "💡 <i>Tap any credential above to copy it instantly.</i>"
+    out += "💡 <i>যেকোনো লেখার উপর ট্যাপ করে সরাসরি কপি করে নিতে পারেন।</i>"
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🟢 🛒 Continue Shopping 🟢", callback_data="back_to_menu")],
-        [InlineKeyboardButton("💬 Support / Report Issue", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [InlineKeyboardButton("💬 Support", url=f"https://t.me/{SUPPORT_USERNAME}")],
     ])
     await send_or_edit_menu(update, context, out, markup)
 
 
-# ----------------- REAL-TIME AUTO-POLL BACKGROUND TASK ----------------- #
+# ----------------- AUTO-POLL BACKGROUND TASK ----------------- #
 async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, message_id: int, context: ContextTypes.DEFAULT_TYPE, prod_id: int = None, qty: int = None):
     poll_duration = 600
     interval = 4
     elapsed = 0
-
     valid_statuses = ["success", "paid", "completed", "txn_success"]
 
     while elapsed < poll_duration:
@@ -903,19 +915,19 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
                         p_ok, p_res = purchase_with_balance(user_id, prod_id, qty)
                         if p_ok:
                             raw, o_id, total, name, quantity = p_res
-                            items = "\n".join([f"<code>{x}</code>" for x in raw])
+                            formatted = format_credentials_card(raw)
                             msg = (
-                                "🎉 <b>PAYMENT DETECTED & DELIVERED!</b>\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "🎉 <b>PAYMENT VERIFIED & DELIVERED!</b>\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"🆔 <b>Order ID:</b> <code>#{o_id}</code>\n"
                                 f"📦 <b>Product:</b> {name}\n"
                                 f"🔢 <b>Quantity:</b> <code>{quantity} unit(s)</code>\n"
                                 f"💵 <b>Paid:</b> <code>{CURRENCY_SYMBOL}{total:.2f}</code>\n"
-                                f"🔖 <b>Bank Ref/UTR:</b> <code>{utr}</code>\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"🔑 <b>Delivered Credentials:</b>\n\n{items}\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━\n"
-                                "💡 <i>Tap any credential above to copy it instantly.</i>"
+                                f"🔖 <b>Bank Ref:</b> <code>{utr}</code>\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🔐 <b>DELIVERED CREDENTIALS:</b>\n\n{formatted}\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "💡 <i>যেকোনো তথ্য সরাসরি এক ক্লিকে কপি করুন।</i>"
                             )
                             markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Continue Shopping 🟢", callback_data="back_to_menu")]])
                             try:
@@ -929,12 +941,12 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
                 if rec_ok:
                     succ_msg = (
                         "✅ <b>PAYMENT RECEIVED & VERIFIED!</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"💵 <b>Amount Credited:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
                         f"💼 <b>Updated Wallet:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
                         f"🆔 <b>Verified Ref/UTR:</b> <code>{utr}</code>\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🎉 <i>Your funds are ready! Start ordering now.</i>"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "🎉 <i>আপনার ব্যালেন্স যুক্ত হয়েছে! এখনই প্রোডাক্ট অর্ডার করুন।</i>"
                     )
                     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Browse Store 🟢", callback_data="back_to_menu")]])
                     try:
@@ -976,14 +988,14 @@ async def generate_and_send_upi_payment(user_id: int, user_name: str, amount: fl
 
     cap = (
         f"⚡ <b>SCAN & PAY VIA ANY UPI APP</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Amount:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
         f"🆔 <b>Order ID:</b> <code>{order_id}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 <b>Direct App Scan:</b>\n"
-        "1. Scan directly using <b>Paytm, PhonePe, GPay, or BHIM</b>.\n"
-        f"2. Pay exact amount: <b>{CURRENCY_SYMBOL}{amount:.2f}</b>.\n"
-        "3. <b>Done!</b> Payment detects automatically in 3-5 seconds.\n\n"
+        "1. Paytm, PhonePe, GPay বা BHIM দিয়ে স্ক্যান করুন।\n"
+        f"2. ঠিক <b>{CURRENCY_SYMBOL}{amount:.2f}</b> পে করুন।\n"
+        "3. ৩-৫ সেকেন্ডের মধ্যে বট স্বয়ংক্রিয়ভাবে পেমেন্ট ডিটেক্ট করবে।\n\n"
         "🔄 <i>Auto-detecting payment status in real-time...</i>"
     )
 
@@ -998,7 +1010,6 @@ async def generate_and_send_upi_payment(user_id: int, user_name: str, amount: fl
             pass
 
     sent_msg = await context.bot.send_photo(chat_id=user_id, photo=qr_img, caption=cap, reply_markup=markup, parse_mode="HTML")
-
     ACTIVE_PAYMENT_POLLS[order_id] = True
     asyncio.create_task(auto_poll_payment_status(order_id, user_id, amount, sent_msg.message_id, context, prod_id, qty))
 
@@ -1013,20 +1024,19 @@ async def generate_and_send_usdt_payment(user_id: int, user_name: str, usdt_amou
 
     ok, order_id, res_data = await create_smb_order(user_id, user_name, usdt_amount, currency="USDT", prod_id=prod_id, qty=qty)
     inr_equiv = usdt_amount * USDT_RATE_INR
-
     crypto_qr = res_data.get("qr_code") or res_data.get("qr_image") or f"https://api.qrserver.com/v1/create-qr-code/?size=350x350&data={USDT_WALLET_ADDRESS}"
 
     cap = (
         f"💎 <b>USDT (TRC-20) / BINANCE PAY QR</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💎 <b>Pay Exact:</b> <code>{usdt_amount:.2f} USDT</code>\n"
         f"💵 <b>Wallet Credit:</b> <code>{CURRENCY_SYMBOL}{inr_equiv:.2f}</code>\n"
         f"📍 <b>Deposit Address:</b>\n<code>{USDT_WALLET_ADDRESS}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 <b>Direct Crypto Scan:</b>\n"
-        "1. Scan with <b>Binance App, TrustWallet, or TronLink</b>.\n"
-        "2. Send exact USDT on <b>TRC-20</b> network.\n"
-        "3. <b>Done!</b> Auto-detects on chain instantly.\n\n"
+        "1. Binance বা যেকোনো TRC-20 ওয়ালেট দিয়ে স্ক্যান করুন।\n"
+        "2. সঠিক USDT সেন্ড করুন।\n"
+        "3. ব্লকচেইন কনফার্মেশনের সাথে সাথে অটোমেটিক অ্যাড হবে।\n\n"
         "🔄 <i>Auto-detecting payment status in real-time...</i>"
     )
 
@@ -1041,7 +1051,6 @@ async def generate_and_send_usdt_payment(user_id: int, user_name: str, usdt_amou
             pass
 
     sent_msg = await context.bot.send_photo(chat_id=user_id, photo=crypto_qr, caption=cap, reply_markup=markup, parse_mode="HTML")
-
     ACTIVE_PAYMENT_POLLS[order_id] = True
     asyncio.create_task(auto_poll_payment_status(order_id, user_id, inr_equiv, sent_msg.message_id, context, prod_id, qty))
 
@@ -1068,11 +1077,11 @@ async def show_payment_options_for_order(update: Update, context: ContextTypes.D
 
     text = (
         "🛒 <b>ORDER CONFIRMATION & PAYMENT</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 <b>Item:</b> {name}\n"
         f"🔢 <b>Quantity:</b> <code>{qty} unit(s)</code>\n"
         f"💵 <b>Total Amount:</b> <code>{CURRENCY_SYMBOL}{inr:.2f}</code> ({usdt:.2f} USDT)\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💼 <b>Your Balance:</b> <code>{CURRENCY_SYMBOL}{bal:.2f}</code>\n\n"
         "👇 <b>Select payment method below:</b>"
     )
@@ -1093,18 +1102,18 @@ async def execute_balance_checkout(update: Update, context: ContextTypes.DEFAULT
         return
 
     raw, o_id, total, name, quantity = res
-    items = "\n".join([f"<code>{x}</code>" for x in raw])
+    formatted = format_credentials_card(raw)
     msg = (
         "💎 <b>ORDER DELIVERED SUCCESSFULLY!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🆔 <b>Order ID:</b> <code>#{o_id}</code>\n"
         f"📦 <b>Product:</b> {name}\n"
         f"🔢 <b>Quantity:</b> <code>{quantity} unit(s)</code>\n"
         f"💵 <b>Paid:</b> <code>{CURRENCY_SYMBOL}{total:.2f}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔑 <b>Delivered Credentials:</b>\n\n{items}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 <i>Tap any credential above to copy it instantly.</i>"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔐 <b>DELIVERED CREDENTIALS:</b>\n\n{formatted}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 <i>যেকোনো তথ্য সরাসরি এক ক্লিকে কপি করুন।</i>"
     )
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛍️ Continue Shopping 🟢", callback_data="back_to_menu")]])
     await send_or_edit_menu(update, context, msg, markup)
@@ -1127,7 +1136,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🛒 <b>Official Digital Store</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>Exchange Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n"
         "⚡ <i>Instant automated delivery and wallet refills.</i>\n\n"
         "👇 <i>Select an item below to check details and order:</i>"
@@ -1166,11 +1175,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("🔢 Try Again", callback_data="upi_amt_custom")],
                     [InlineKeyboardButton("❌ Cancel / Back", callback_data="cancel_payment_flow")],
                 ])
-                await update.message.reply_text(
-                    f"⚠️ Minimum deposit is {CURRENCY_SYMBOL}{MIN_DEPOSIT_INR:.2f}.",
-                    reply_markup=markup,
-                    parse_mode="HTML",
-                )
+                await update.message.reply_text(f"⚠️ Minimum deposit is {CURRENCY_SYMBOL}{MIN_DEPOSIT_INR:.2f}.", reply_markup=markup, parse_mode="HTML")
                 return
             await generate_and_send_upi_payment(user.id, user.first_name, val, context)
             return
@@ -1188,11 +1193,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("🔢 Try Again", callback_data="usdt_amt_custom")],
                     [InlineKeyboardButton("❌ Cancel / Back", callback_data="cancel_payment_flow")],
                 ])
-                await update.message.reply_text(
-                    f"⚠️ Minimum deposit is {MIN_DEPOSIT_USDT:.2f} USDT.",
-                    reply_markup=markup,
-                    parse_mode="HTML",
-                )
+                await update.message.reply_text(f"⚠️ Minimum deposit is {MIN_DEPOSIT_USDT:.2f} USDT.", reply_markup=markup, parse_mode="HTML")
                 return
             await generate_and_send_usdt_payment(user.id, user.first_name, val, context)
             return
@@ -1205,8 +1206,8 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["temp_prod_name"] = text
         context.user_data["adm_flow"] = "new_prod_price"
         await update.message.reply_text(
-            f"✅ Name set: <b>{text}</b>\n\n"
-            "💵 Now enter the <b>Price in INR (₹)</b> for this product (e.g. 50 or 99.5):",
+            f"✅ <b>Name:</b> {html.escape(text)}\n\n"
+            "💵 Now enter the <b>Price in INR (₹)</b> for this product (e.g. 50 or 99):",
             parse_mode="HTML"
         )
         return
@@ -1217,7 +1218,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["temp_prod_price"] = price
             context.user_data["adm_flow"] = "new_prod_desc"
             await update.message.reply_text(
-                f"✅ Price set: <b>₹{price:.2f}</b>\n\n"
+                f"✅ <b>Price:</b> ₹{price:.2f}\n\n"
                 "📝 Now enter a short <b>Description</b> for this product:",
                 parse_mode="HTML"
             )
@@ -1234,36 +1235,65 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pid = add_new_product(name, price, desc)
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
         await update.message.reply_text(
-            f"🎉 <b>New Service/Product Added Successfully!</b>\n\n"
+            f"🎉 <b>New Service Added Successfully!</b>\n\n"
             f"🆔 <b>ID:</b> #{pid}\n"
-            f"📦 <b>Name:</b> {name}\n"
+            f"📦 <b>Name:</b> {html.escape(name)}\n"
             f"💵 <b>Price:</b> ₹{price:.2f}\n"
-            f"📝 <b>Description:</b> {desc}\n\n"
-            f"Users can now view and purchase this service!",
+            f"📝 <b>Description:</b> {html.escape(desc)}",
             reply_markup=markup,
             parse_mode="HTML"
         )
         return
 
-    # ----------------- ADMIN: ADD STOCK FLOW ----------------- #
-    if context.user_data.get("adm_flow") == "add_stock_items":
-        pid = context.user_data.get("target_prod_id")
-        lines = text.splitlines()
-        added = add_bulk_stock(pid, lines)
-        total_now = get_available_stock_count(pid)
-        context.user_data.clear()
-
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
+    # ----------------- ADMIN: 1-BY-1 STOCK INPUT FLOW ----------------- #
+    if context.user_data.get("adm_flow") == "stock_step_account":
+        context.user_data["temp_account"] = text
+        context.user_data["adm_flow"] = "stock_step_password"
+        m = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Done / Finish", callback_data="adm_back_dash")]])
         await update.message.reply_text(
-            f"🎉 <b>Stock Added Successfully!</b>\n"
-            f"➕ Added: <code>{added}</code> item(s)\n"
-            f"🧊 Total Available Stock: <code>{total_now}</code> item(s)",
-            reply_markup=markup,
+            f"✅ <b>Account / Email Received:</b>\n<code>{html.escape(text)}</code>\n\n"
+            f"🔑 <b>Now send the Password for this account:</b>\n"
+            f"<i>(যদি কোনো পাসওয়ার্ড না থাকে বা শুধু লিঙ্ক হয়, তবে <code>none</code> লিখে পাঠান)</i>",
+            reply_markup=m,
             parse_mode="HTML"
         )
         return
 
-    # ----------------- ADMIN: DIRECT CREDIT ----------------- #
+    if context.user_data.get("adm_flow") == "stock_step_password":
+        pwd = text
+        acc = context.user_data.get("temp_account")
+        pid = context.user_data.get("target_prod_id")
+
+        if pwd.lower() == "none":
+            full_data = acc
+        else:
+            full_data = f"{acc} || {pwd}"
+
+        add_single_item_stock(pid, full_data)
+        count_now = get_available_stock_count(pid)
+        prod = get_product_by_id(pid)
+
+        # লুপ চালু রাখা
+        context.user_data["adm_flow"] = "stock_step_account"
+        context.user_data.pop("temp_account", None)
+
+        m = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛑 Done / Finish", callback_data="adm_back_dash")],
+            [InlineKeyboardButton("👑 Admin Dashboard", callback_data="adm_back_dash")]
+        ])
+
+        await update.message.reply_text(
+            f"🎉 <b>Item Added to {prod[1]}!</b>\n"
+            f"📧 Account: <code>{html.escape(acc)}</code>\n"
+            f"🔑 Password: <code>{html.escape(pwd)}</code>\n"
+            f"🧊 Available Stock: <code>{count_now} Units</code>\n\n"
+            f"➡️ <b>পরবর্তী ইমেল/অ্যাকাউন্টটি পাঠান</b> (অথবা শেষ করতে Done চাপুন):",
+            reply_markup=m,
+            parse_mode="HTML"
+        )
+        return
+
+    # ----------------- ADMIN: DIRECT BALANCE CREDIT ----------------- #
     if context.user_data.get("adm_step") == "credit_user":
         context.user_data.pop("adm_step", None)
         p = text.split()
@@ -1290,12 +1320,12 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_payment_options_for_order(update, context, prod_id, int(text))
         return
 
-    # মেনু নেভিগেশন
+    # সাধারণ মেনু বাটন
     upper_t = text.upper()
     if "BUY PRODUCTS" in upper_t:
         text_menu = (
             "🛒 <b>Official Digital Store</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💰 <b>Exchange Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n\n"
             "👇 <i>Select an item below to check details and order:</i>"
         )
@@ -1371,7 +1401,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back_to_menu":
         text_menu = (
             "🛒 <b>Official Digital Store</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💰 <b>Exchange Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n\n"
             "👇 <i>Select an item below to check details and order:</i>"
         )
@@ -1400,7 +1430,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # USDT Deposit
     elif data == "choose_usdt_deposit":
-        t = f"💎 <b>Select USDT Deposit Amount (Binance Pay / TRC20)</b>\nMinimum deposit: {MIN_DEPOSIT_USDT:.2f} USDT (1 USDT = ₹{USDT_RATE_INR:.0f})"
+        t = f"💎 <b>Select USDT Deposit Amount (Binance Pay / TRC20)</b>\nMinimum deposit: {MIN_DEPOSIT_USDT:.2f} USDT"
         await send_or_edit_menu(update, context, t, get_usdt_amount_selection_keyboard())
 
     elif data.startswith("usdt_amt_"):
@@ -1420,7 +1450,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = get_available_stock_count(pid)
         t = (
             f"📦 <b>{prod[1]}</b>\n"
-            f"📝 <i>{prod[3] or 'No description provided.'}</i>\n\n"
+            f"📝 <i>{prod[3] or 'Fresh verified stock.'}</i>\n\n"
             f"💵 <b>Price:</b> {CURRENCY_SYMBOL}{prod[2]:.2f}\n"
             f"🧊 <b>Stock:</b> {stock} units\n\n"
             "Choose quantity below:"
@@ -1453,7 +1483,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             req_usdt = (prod[2] * int(p[2])) / USDT_RATE_INR
             await generate_and_send_usdt_payment(user.id, user.first_name, req_usdt, context, previous_message=q.message, prod_id=int(p[1]), qty=int(p[2]))
 
-    # ----------------- ADMIN HANDLERS ----------------- #
+    # ----------------- ADMIN DASHBOARD HANDLERS ----------------- #
     elif data in ["adm_back_dash", "adm_refresh_stats"]:
         if user.id not in ADMIN_IDS:
             return
@@ -1461,7 +1491,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
-    # ১. নতুন প্রোডাক্ট যোগ
     elif data == "adm_create_product":
         if user.id not in ADMIN_IDS:
             return
@@ -1469,11 +1498,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
         await send_or_edit_menu(
             update, context,
-            "📦 <b>ADD NEW SERVICE/PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━\nSend the <b>Product Name</b> (e.g., Netflix 1 Month / ChatGPT Plus):",
+            "📦 <b>ADD NEW SERVICE/PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nSend the <b>Product Name</b> (e.g., Netflix Premium 1 Month):",
             m
         )
 
-    # ২. প্রোডাক্ট ডিলিট মেনু
     elif data == "adm_delete_product_menu":
         if user.id not in ADMIN_IDS:
             return
@@ -1482,7 +1510,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for p in prods:
             kb.append([InlineKeyboardButton(f"🗑️ Delete {p[1]}", callback_data=f"adm_delprod_{p[0]}")])
         kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
-        await send_or_edit_menu(update, context, "⚠️ <b>Select a product to completely delete:</b>", InlineKeyboardMarkup(kb))
+        await send_or_edit_menu(update, context, "⚠️ <b>Select a product to completely remove:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_delprod_"):
         if user.id not in ADMIN_IDS:
@@ -1493,34 +1521,32 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
-    # ৩. স্টক যোগ মেনু
     elif data == "adm_stock_menu":
         if user.id not in ADMIN_IDS:
             return
         prods = get_all_products()
         kb = []
         for p in prods:
-            kb.append([InlineKeyboardButton(f"📦 Add stock for {p[1]}", callback_data=f"adm_addstockto_{p[0]}")])
+            kb.append([InlineKeyboardButton(f"📥 Add Stock to {p[1]}", callback_data=f"adm_addstockto_{p[0]}")])
         kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
-        await send_or_edit_menu(update, context, "📦 <b>Select product to add stock:</b>", InlineKeyboardMarkup(kb))
+        await send_or_edit_menu(update, context, "📦 <b>Select product to add credentials:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_addstockto_"):
         if user.id not in ADMIN_IDS:
             return
         pid = int(data.split("_")[2])
         prod = get_product_by_id(pid)
-        context.user_data["adm_flow"] = "add_stock_items"
+        context.user_data["adm_flow"] = "stock_step_account"
         context.user_data["target_prod_id"] = pid
         m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
         await send_or_edit_menu(
             update, context,
-            f"📦 <b>Adding stock for: {prod[1]}</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Send the account credentials or links below.\n"
-            f"💡 <i>You can send multiple items at once (one item per line).</i>",
+            f"📦 <b>Adding Stock for: {prod[1]}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👉 <b>Step 1:</b> Send the <b>Account / Email / Username</b>:\n"
+            f"<i>(পরের ধাপে পাসওয়ার্ড চাইবে)</i>",
             m
         )
 
-    # ৪. ইউজার ব্যালেন্স যোগ
     elif data == "adm_credit_user":
         if user.id not in ADMIN_IDS:
             return
@@ -1528,7 +1554,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
         await send_or_edit_menu(update, context, "💳 Send: <code>&lt;user_id&gt; &lt;amount&gt;</code>", m)
 
-    # ৫. আনসোল্ড স্টক ক্লিয়ার
     elif data == "adm_rm_menu":
         if user.id not in ADMIN_IDS:
             return
