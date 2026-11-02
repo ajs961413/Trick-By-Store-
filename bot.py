@@ -32,8 +32,8 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8655496659:AAEEV-VbJDQpXfVUhHQWvzedzeM0BHL9RGM")
 BOT_NAME = "Trick By Store"
 
-# Admin IDs (User ID 8383343412 added here)
-ADMIN_IDS = [1136742030, 8095355810, 8383343412]
+# শুধুমাত্র আপনার নির্দিষ্ট অ্যাডমিন আইডি
+ADMIN_IDS = [1136742030]
 
 CHANNEL_USERNAME = "@trickbylo0t"
 CHANNEL_URL = "https://t.me/trickbylo0t"
@@ -42,26 +42,23 @@ SUPPORT_USERNAME = "TrickBy_Support"
 CURRENCY_SYMBOL = "₹"
 DB_PATH = "shop_bot.db"
 
-# Minimum Deposit Limits
+# ডিপোজিট লিমিট
 MIN_DEPOSIT_INR = 1.0
 MIN_DEPOSIT_USDT = 0.05
 USDT_RATE_INR = 100.0
 
 MERCHANT_VPA = "malprakash1@bpunity"
 
-# SMB Gateway Credentials
+# গেটওয়ে তথ্য
 SMB_API_KEY = os.getenv("SMB_API_KEY", "pi_live_85218ea4129818ab0da87038fe7162cd54cbc052e555103c")
 SMB_API_SECRET = os.getenv("SMB_API_SECRET", "sk_live_d9037d775a6ffeb892f6798f0ce6ebfcafe3f628ff54957c")
 SMB_CREATE_ORDER_URL = "https://smbupi.com/api/create-order"
 SMB_CHECK_STATUS_URL = "https://smbupi.com/api/check-status"
 
-# TRC20 Crypto Wallet
 USDT_WALLET_ADDRESS = "TNtuYDZGzgayG74ZKXTMGZ7h1c9HwzenY6"
 
 USER_LAST_CLICK = {}
 COOLDOWN_SECONDS = 1.2
-
-# Active Polling Task Tracking
 ACTIVE_PAYMENT_POLLS = {}
 
 logging.basicConfig(
@@ -101,7 +98,7 @@ def init_db():
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
-            product_id INTEGER PRIMARY KEY,
+            product_id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             price REAL NOT NULL,
             description TEXT
@@ -138,16 +135,13 @@ def init_db():
         )
     """)
 
-    cursor.execute(
-        "INSERT INTO products (product_id, name, price, description) VALUES (1, ?, ?, ?) "
-        "ON CONFLICT(product_id) DO UPDATE SET name = excluded.name, price = excluded.price, description = excluded.description",
-        ("Indian Fresh Verified Gmail", 40.0, "Fresh Verified Clean Indian Gmail"),
-    )
-    cursor.execute(
-        "INSERT INTO products (product_id, name, price, description) VALUES (2, ?, ?, ?) "
-        "ON CONFLICT(product_id) DO UPDATE SET name = excluded.name, price = excluded.price, description = excluded.description",
-        ("Gemini 18 Month Pro Link", 37.0, "Gemini Advanced 18 Months Activation Link"),
-    )
+    # ডিফল্ট প্রোডাক্ট (যদি টেবিল খালি থাকে)
+    cursor.execute("SELECT COUNT(*) FROM products")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO products (product_id, name, price, description) VALUES (1, ?, ?, ?)",
+                       ("Indian Fresh Verified Gmail", 40.0, "Fresh Verified Clean Indian Gmail"))
+        cursor.execute("INSERT INTO products (product_id, name, price, description) VALUES (2, ?, ?, ?)",
+                       ("Gemini 18 Month Pro Link", 37.0, "Gemini Advanced 18 Months Activation Link"))
     conn.commit()
     conn.close()
 
@@ -202,6 +196,34 @@ def get_or_create_api_key(user_id: int, regenerate: bool = False) -> str:
         conn.commit()
     conn.close()
     return key
+
+
+def get_all_products():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT product_id, name, price, description FROM products")
+    prods = c.fetchall()
+    conn.close()
+    return prods
+
+
+def add_new_product(name: str, price: float, description: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO products (name, price, description) VALUES (?, ?, ?)", (name, price, description))
+    conn.commit()
+    pid = c.lastrowid
+    conn.close()
+    return pid
+
+
+def delete_product_by_id(product_id: int):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM products WHERE product_id = ?", (product_id,))
+    c.execute("DELETE FROM inventory WHERE product_id = ? AND is_sold = 0", (product_id,))
+    conn.commit()
+    conn.close()
 
 
 def get_available_stock_count(product_id: int) -> int:
@@ -260,11 +282,8 @@ def get_admin_dashboard_stats():
     c.execute("SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE date(created_at) = date(?)", (today,))
     td_sold = c.fetchone()[0]
     
-    c.execute("SELECT COUNT(*) FROM inventory WHERE product_id = 1 AND is_sold = 0")
-    gmail_stock = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM inventory WHERE product_id = 2 AND is_sold = 0")
-    gemini_stock = c.fetchone()[0]
-    total_stock = gmail_stock + gemini_stock
+    c.execute("SELECT COUNT(*) FROM inventory WHERE is_sold = 0")
+    total_stock = c.fetchone()[0]
     
     c.execute("SELECT COUNT(*) FROM users")
     users = c.fetchone()[0]
@@ -278,8 +297,6 @@ def get_admin_dashboard_stats():
         "td_rev": td_rev,
         "t_sold": t_sold,
         "td_sold": td_sold,
-        "gmail_stock": gmail_stock,
-        "gemini_stock": gemini_stock,
         "total_stock": total_stock,
         "users": users,
         "total_credited": total_credited,
@@ -358,7 +375,7 @@ def get_user_orders(user_id: int):
     return rows
 
 
-# ----------------- SMB UPI GATEWAY INTEGRATION ----------------- #
+# ----------------- SMB UPI GATEWAY ----------------- #
 async def create_smb_order(user_id: int, user_name: str, amount: float, currency: str = "INR", prod_id: int = None, qty: int = None):
     unique_order_id = f"TBS_{user_id}_{int(time.time())}_{secrets.token_hex(3)}"
     headers = {
@@ -440,42 +457,16 @@ def get_force_join_card(user_first_name: str):
         "🔒 <b>SECURITY VERIFICATION REQUIRED</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Hello <b>{html.escape(user_first_name or '')}</b>,\n\n"
-        "To protect our bot from spam and access all store items, "
-        "you must join our official Telegram channel.\n\n"
+        "To access our services and products, please join our official Telegram channel.\n\n"
         f"📢 <b>Channel:</b> {CHANNEL_USERNAME}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Click below to join, then tap 'Verify & Unlock Bot' to start!</i>"
+        "<i>Click below to join, then tap 'Verify & Unlock Bot' to continue!</i>"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📢 Join Official Channel", url=CHANNEL_URL)],
         [InlineKeyboardButton("⚡ Verify & Unlock Bot", callback_data="verify_channel_join")],
     ])
     return text, markup
-
-
-async def broadcast_restock_alert(product_name: str, added_count: int, total_stock: int, price: float, context: ContextTypes.DEFAULT_TYPE):
-    user_ids = get_all_user_ids()
-    if not user_ids:
-        return
-
-    msg = (
-        "🔥 <b>MASSIVE RESTOCK ALERT!</b> 🔥\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Product:</b> {product_name}\n"
-        f"⚡ <b>Fresh Added:</b> <code>+{added_count} Units</code>\n"
-        f"🧊 <b>Available Stock:</b> <code>{total_stock} Units</code>\n"
-        f"💵 <b>Price:</b> <code>{CURRENCY_SYMBOL}{price:.2f}</code> (~{price/USDT_RATE_INR:.2f} USDT)\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🚀 <i>Items are verified & fresh! Grab yours now!</i>"
-    )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 🛒 Buy Now 🟢", callback_data="back_to_menu")]])
-
-    for uid in user_ids:
-        try:
-            await context.bot.send_message(chat_id=uid, text=msg, reply_markup=markup, parse_mode="HTML")
-            await asyncio.sleep(0.05)
-        except Exception:
-            continue
 
 
 # ----------------- SERVER & WEBHOOK LISTENER ----------------- #
@@ -638,12 +629,22 @@ def get_main_reply_keyboard():
 
 
 def get_products_inline_keyboard():
-    g = get_available_stock_count(1)
-    gm = get_available_stock_count(2)
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🟢 🛒 Indian Fresh Verified Gmail · ₹40 = 0.40 USDT ({g})", callback_data="prod_1")],
-        [InlineKeyboardButton(f"🟢 🛒 Gemini 18 Month Pro · ₹37 = 0.37 USDT ({gm})", callback_data="prod_2")],
-    ])
+    prods = get_all_products()
+    keyboard = []
+    if not prods:
+        keyboard.append([InlineKeyboardButton("❌ No Products Available", callback_data="none")])
+    else:
+        for p in prods:
+            pid, name, price, _ = p
+            stock = get_available_stock_count(pid)
+            usdt_p = price / USDT_RATE_INR
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🛒 {name} · ₹{price:.0f} ≈ {usdt_p:.2f} USDT ({stock})",
+                    callback_data=f"prod_{pid}"
+                )
+            ])
+    return InlineKeyboardMarkup(keyboard)
 
 
 def get_quantity_keyboard(prod_id: int):
@@ -703,16 +704,21 @@ def get_usdt_amount_selection_keyboard():
 
 def build_admin_dashboard_text_and_markup():
     s = get_admin_dashboard_stats()
+    prods = get_all_products()
+    stock_breakdown = ""
+    for p in prods:
+        c = get_available_stock_count(p[0])
+        stock_breakdown += f"• {p[1]}: <code>{c} Units</code>\n"
+
     text = (
         "👑 <b>ADMIN EXECUTIVE COMMAND CENTER</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📅 <b>Report Date:</b> <code>{s['today_date']}</code>\n"
-        f"👥 <b>Total Registered Users:</b> <code>{s['users']} Members</code>\n"
+        f"📅 <b>Date:</b> <code>{s['today_date']}</code>\n"
+        f"👥 <b>Total Users:</b> <code>{s['users']} Members</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📦 <b>INVENTORY SUMMARY</b>\n"
-        f"• 📧 Gmail Available: <code>{s['gmail_stock']} Units</code>\n"
-        f"• 🔗 Gemini Links: <code>{s['gemini_stock']} Units</code>\n"
-        f"• 🧊 Total In-Stock: <code>{s['total_stock']} Units</code>\n"
+        f"{stock_breakdown or '• No active products yet\n'}"
+        f"🧊 Total Available Stock: <code>{s['total_stock']} Units</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📈 <b>SALES & REVENUE OVERVIEW</b>\n"
         f"⚡ <b>Today's Sales:</b> <code>{s['td_sold']} Units</code>\n"
@@ -720,12 +726,15 @@ def build_admin_dashboard_text_and_markup():
         f"📦 <b>All-Time Sold:</b> <code>{s['t_sold']} Units</code>\n"
         f"💰 <b>All-Time Revenue:</b> <code>{CURRENCY_SYMBOL}{s['t_rev']:.2f}</code>\n"
         f"💎 <b>Gateway Deposits:</b> <code>{CURRENCY_SYMBOL}{s['total_credited']:.2f}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🛡️ <i>Live Real-Time Fraud-Proof Engine</i>"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("➕ Add Stock (1-by-1 Continuous)", callback_data="adm_stock_menu"),
+            InlineKeyboardButton("➕ Add New Service", callback_data="adm_create_product"),
+            InlineKeyboardButton("❌ Delete Service", callback_data="adm_delete_product_menu"),
+        ],
+        [
+            InlineKeyboardButton("📦 Add Stock (Items)", callback_data="adm_stock_menu"),
             InlineKeyboardButton("🗑️ Clear Unsold Stock", callback_data="adm_rm_menu"),
         ],
         [
@@ -788,7 +797,7 @@ async def render_api_view(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         '  "product_id": 1,\n'
         '  "quantity": 1\n'
         "}</code>\n\n"
-        "💡 <i>Orders deduct directly from wallet balance and return instant JSON credentials.</i>"
+        "💡 <i>Orders deduct directly from wallet balance and return instant credentials.</i>"
     )
     markup = InlineKeyboardMarkup([
         [
@@ -805,14 +814,11 @@ async def render_recovery_view(update: Update, context: ContextTypes.DEFAULT_TYP
         "🛡️ <b>ACCOUNT RECOVERY & SAFETY POLICY</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "<b>1. Quality Assurance:</b>\n"
-        "• All accounts sold are 100% fresh, clean, and verified.\n"
-        "• No recovery phone number or secondary email pre-attached.\n\n"
-        "<b>2. Immediate Setup Instructions:</b>\n"
-        "• Log in to your purchased account immediately.\n"
-        "• Add your own recovery email & phone number.\n"
-        "• Update password to secure full ownership.\n\n"
+        "• All digital products sold are 100% fresh and clean.\n\n"
+        "<b>2. Immediate Setup:</b>\n"
+        "• Check and secure your purchased accounts or links immediately.\n\n"
         "<b>3. Replacement Warranty:</b>\n"
-        "• All accounts come with a <b>30-minute replacement warranty</b> for login issues."
+        "• Replacement guarantee applicable per product guidelines."
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 Contact Support", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -827,11 +833,9 @@ async def render_support_view(update: Update, context: ContextTypes.DEFAULT_TYPE
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "Have questions about deposits, deliveries, or custom orders?\n\n"
         "🕒 <b>Support Hours:</b> 24/7 Available\n"
-        "⚡ <b>Response Time:</b> Within 5-15 Minutes\n\n"
         f"📢 <b>Official Channel:</b> {CHANNEL_USERNAME}\n"
         f"👤 <b>Live Admin Support:</b> @{SUPPORT_USERNAME}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Click below to start a direct chat with our support team.</i>"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("👤 Contact Live Admin", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -1152,7 +1156,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(join_text, reply_markup=join_markup, parse_mode="HTML")
             return
 
-    # Custom UPI Amount
+    # Custom UPI Deposit
     if context.user_data.get("waiting_for_custom_upi_deposit"):
         context.user_data["waiting_for_custom_upi_deposit"] = False
         try:
@@ -1171,10 +1175,10 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await generate_and_send_upi_payment(user.id, user.first_name, val, context)
             return
         except ValueError:
-            await update.message.reply_text("❌ Please enter a valid number (e.g. 10, 50).")
+            await update.message.reply_text("❌ Please enter a valid number.")
             return
 
-    # Custom USDT Amount
+    # Custom USDT Deposit
     if context.user_data.get("waiting_for_custom_usdt_deposit"):
         context.user_data["waiting_for_custom_usdt_deposit"] = False
         try:
@@ -1193,93 +1197,73 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await generate_and_send_usdt_payment(user.id, user.first_name, val, context)
             return
         except ValueError:
-            await update.message.reply_text("❌ Please enter a valid number (e.g. 0.05, 1).")
+            await update.message.reply_text("❌ Please enter a valid number.")
             return
 
-    # ADMIN: Gmail Step 1
-    if context.user_data.get("adm_flow") == "gmail_step_email":
-        email_candidate = text.strip()
-        if not email_candidate.lower().endswith("@gmail.com"):
-            m = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")]
-            ])
+    # ----------------- ADMIN: NEW PRODUCT FLOW ----------------- #
+    if context.user_data.get("adm_flow") == "new_prod_name":
+        context.user_data["temp_prod_name"] = text
+        context.user_data["adm_flow"] = "new_prod_price"
+        await update.message.reply_text(
+            f"✅ Name set: <b>{text}</b>\n\n"
+            "💵 Now enter the <b>Price in INR (₹)</b> for this product (e.g. 50 or 99.5):",
+            parse_mode="HTML"
+        )
+        return
+
+    if context.user_data.get("adm_flow") == "new_prod_price":
+        try:
+            price = float(text)
+            context.user_data["temp_prod_price"] = price
+            context.user_data["adm_flow"] = "new_prod_desc"
             await update.message.reply_text(
-                "❌ <b>Invalid Gmail Address!</b>\n\n"
-                "The email address must end with <code>@gmail.com</code>.\n"
-                "Please send a valid Gmail address:",
-                reply_markup=m,
-                parse_mode="HTML",
+                f"✅ Price set: <b>₹{price:.2f}</b>\n\n"
+                "📝 Now enter a short <b>Description</b> for this product:",
+                parse_mode="HTML"
             )
-            return
+        except ValueError:
+            await update.message.reply_text("❌ Please enter a valid numeric price (e.g. 45 or 120.50):")
+        return
 
-        context.user_data["temp_gmail"] = email_candidate
-        context.user_data["adm_flow"] = "gmail_step_password"
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")]
-        ])
+    if context.user_data.get("adm_flow") == "new_prod_desc":
+        desc = text
+        name = context.user_data.get("temp_prod_name")
+        price = context.user_data.get("temp_prod_price")
+        context.user_data.clear()
+
+        pid = add_new_product(name, price, desc)
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
         await update.message.reply_text(
-            f"✅ Gmail accepted: <code>{email_candidate}</code>\n\n"
-            f"🔑 Now send the <b>Password</b> for this account:",
-            reply_markup=m,
-            parse_mode="HTML",
+            f"🎉 <b>New Service/Product Added Successfully!</b>\n\n"
+            f"🆔 <b>ID:</b> #{pid}\n"
+            f"📦 <b>Name:</b> {name}\n"
+            f"💵 <b>Price:</b> ₹{price:.2f}\n"
+            f"📝 <b>Description:</b> {desc}\n\n"
+            f"Users can now view and purchase this service!",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
         return
 
-    # ADMIN: Gmail Step 2
-    if context.user_data.get("adm_flow") == "gmail_step_password":
-        pwd = text.strip()
-        gmail_addr = context.user_data.get("temp_gmail")
-        full_cred = f"{gmail_addr}:{pwd}"
+    # ----------------- ADMIN: ADD STOCK FLOW ----------------- #
+    if context.user_data.get("adm_flow") == "add_stock_items":
+        pid = context.user_data.get("target_prod_id")
+        lines = text.splitlines()
+        added = add_bulk_stock(pid, lines)
+        total_now = get_available_stock_count(pid)
+        context.user_data.clear()
 
-        add_bulk_stock(1, [full_cred])
-        total_now = get_available_stock_count(1)
-
-        session_added = context.user_data.get("session_added_count", 0) + 1
-        context.user_data["session_added_count"] = session_added
-
-        context.user_data["adm_flow"] = "gmail_step_email"
-        context.user_data.pop("temp_gmail", None)
-
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")],
-            [InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")],
-        ])
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
         await update.message.reply_text(
-            f"🎉 <b>Gmail Added Successfully!</b>\n"
-            f"📦 Credential: <code>{full_cred}</code>\n"
-            f"📊 Added in this session: <code>{session_added}</code> item(s)\n"
-            f"🧊 Total Available Stock: <code>{total_now}</code> item(s)\n\n"
-            f"➡️ <b>Send the next Gmail</b> (tap Done below when finished):",
-            reply_markup=m,
-            parse_mode="HTML",
+            f"🎉 <b>Stock Added Successfully!</b>\n"
+            f"➕ Added: <code>{added}</code> item(s)\n"
+            f"🧊 Total Available Stock: <code>{total_now}</code> item(s)",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
         return
 
-    # ADMIN: Gemini Link Input Loop
-    if context.user_data.get("adm_flow") == "gemini_step_link":
-        raw_lines = text.splitlines()
-        added_count = add_bulk_stock(2, raw_lines)
-        total_now = get_available_stock_count(2)
-
-        session_added = context.user_data.get("session_added_count", 0) + added_count
-        context.user_data["session_added_count"] = session_added
-
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")],
-            [InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")],
-        ])
-        await update.message.reply_text(
-            f"✅ <b>Gemini Link Added Successfully!</b>\n"
-            f"➕ Added this message: <code>{added_count}</code> item(s)\n"
-            f"📊 Added in this session: <code>{session_added}</code> item(s)\n"
-            f"🧊 Total Available Stock: <code>{total_now}</code> item(s)\n\n"
-            f"➡️ <b>Send the next Gemini link</b> (tap Done when finished):",
-            reply_markup=m,
-            parse_mode="HTML",
-        )
-        return
-
-    # Admin Direct Balance Credit
+    # ----------------- ADMIN: DIRECT CREDIT ----------------- #
     if context.user_data.get("adm_step") == "credit_user":
         context.user_data.pop("adm_step", None)
         p = text.split()
@@ -1297,7 +1281,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Syntax: <code>&lt;user_id&gt; &lt;amount&gt;</code>", parse_mode="HTML")
         return
 
-    # Custom Quantity Input
+    # Custom Quantity
     if context.user_data.get("waiting_for_custom_qty"):
         prod_id = context.user_data.pop("waiting_for_custom_qty")
         if not text.isdigit() or int(text) <= 0:
@@ -1306,7 +1290,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_payment_options_for_order(update, context, prod_id, int(text))
         return
 
-    # Reply Menu Router
+    # মেনু নেভিগেশন
     upper_t = text.upper()
     if "BUY PRODUCTS" in upper_t:
         text_menu = (
@@ -1401,7 +1385,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("🔑 New API Key Generated Successfully!", show_alert=True)
         await render_api_view(update, context, user.id, key=new_key)
 
-    # UPI Deposit Flow
+    # UPI Deposit
     elif data == "choose_upi_deposit":
         t = f"💳 <b>Select UPI Deposit Amount (INR ₹)</b>\nMinimum deposit: {CURRENCY_SYMBOL}{MIN_DEPOSIT_INR:.2f}"
         await send_or_edit_menu(update, context, t, get_upi_amount_selection_keyboard())
@@ -1414,7 +1398,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await generate_and_send_upi_payment(user.id, user.first_name, float(amt), context, previous_message=q.message)
 
-    # USDT Deposit Flow
+    # USDT Deposit
     elif data == "choose_usdt_deposit":
         t = f"💎 <b>Select USDT Deposit Amount (Binance Pay / TRC20)</b>\nMinimum deposit: {MIN_DEPOSIT_USDT:.2f} USDT (1 USDT = ₹{USDT_RATE_INR:.0f})"
         await send_or_edit_menu(update, context, t, get_usdt_amount_selection_keyboard())
@@ -1427,6 +1411,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await generate_and_send_usdt_payment(user.id, user.first_name, float(amt), context, previous_message=q.message)
 
+    # প্রোডাক্ট সিলেকশন
     elif data.startswith("prod_"):
         pid = int(data.split("_")[1])
         prod = get_product_by_id(pid)
@@ -1435,8 +1420,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stock = get_available_stock_count(pid)
         t = (
             f"📦 <b>{prod[1]}</b>\n"
+            f"📝 <i>{prod[3] or 'No description provided.'}</i>\n\n"
             f"💵 <b>Price:</b> {CURRENCY_SYMBOL}{prod[2]:.2f}\n"
-            f"📦 <b>Stock:</b> {stock} units\n\n"
+            f"🧊 <b>Stock:</b> {stock} units\n\n"
             "Choose quantity below:"
         )
         await send_or_edit_menu(update, context, t, get_quantity_keyboard(pid))
@@ -1467,7 +1453,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             req_usdt = (prod[2] * int(p[2])) / USDT_RATE_INR
             await generate_and_send_usdt_payment(user.id, user.first_name, req_usdt, context, previous_message=q.message, prod_id=int(p[1]), qty=int(p[2]))
 
-    # Admin Actions
+    # ----------------- ADMIN HANDLERS ----------------- #
     elif data in ["adm_back_dash", "adm_refresh_stats"]:
         if user.id not in ADMIN_IDS:
             return
@@ -1475,99 +1461,89 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
-    elif data == "adm_stock_menu":
+    # ১. নতুন প্রোডাক্ট যোগ
+    elif data == "adm_create_product":
         if user.id not in ADMIN_IDS:
             return
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📧 Add Gmail (1-by-1 Step)", callback_data="adm_add_gmail_bulk")],
-            [InlineKeyboardButton("🔗 Add Gemini Link (1-by-1 Continuous)", callback_data="adm_add_gemini_bulk")],
-            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")],
-        ])
-        await send_or_edit_menu(update, context, "📦 <b>Select product to add stock:</b>", m)
-
-    elif data == "adm_add_gmail_bulk":
-        if user.id not in ADMIN_IDS:
-            return
-        context.user_data["adm_flow"] = "gmail_step_email"
-        context.user_data["session_added_count"] = 0
-        context.user_data.pop("temp_gmail", None)
-
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")],
-            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")]
-        ])
-        instruction = (
-            "📧 <b>ADD GMAIL (STEP-BY-STEP)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "First, send only the <b>Gmail Address</b>:\n"
-            "Example: <code>user1@gmail.com</code>\n\n"
-            "<i>(Must end with @gmail.com. Bot will prompt for password next)</i>"
+        context.user_data["adm_flow"] = "new_prod_name"
+        m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
+        await send_or_edit_menu(
+            update, context,
+            "📦 <b>ADD NEW SERVICE/PRODUCT</b>\n━━━━━━━━━━━━━━━━━━━━━━\nSend the <b>Product Name</b> (e.g., Netflix 1 Month / ChatGPT Plus):",
+            m
         )
-        await send_or_edit_menu(update, context, instruction, m)
 
-    elif data == "adm_add_gemini_bulk":
+    # ২. প্রোডাক্ট ডিলিট মেনু
+    elif data == "adm_delete_product_menu":
         if user.id not in ADMIN_IDS:
             return
-        context.user_data["adm_flow"] = "gemini_step_link"
-        context.user_data["session_added_count"] = 0
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Done / Finish Adding", callback_data="adm_finish_stock_loop")],
-            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")]
-        ])
-        instruction = (
-            "➕ <b>ADD GEMINI PRO LINKS (1-BY-1 CONTINUOUS)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "Send activation links one by one:\n"
-            "Format: <code>https://one.google.com/claim/...</code>\n\n"
-            "💡 <i>Send as many links as you want. Tap 'Done' below when finished.</i>"
-        )
-        await send_or_edit_menu(update, context, instruction, m)
+        prods = get_all_products()
+        kb = []
+        for p in prods:
+            kb.append([InlineKeyboardButton(f"🗑️ Delete {p[1]}", callback_data=f"adm_delprod_{p[0]}")])
+        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        await send_or_edit_menu(update, context, "⚠️ <b>Select a product to completely delete:</b>", InlineKeyboardMarkup(kb))
 
-    elif data == "adm_finish_stock_loop":
+    elif data.startswith("adm_delprod_"):
         if user.id not in ADMIN_IDS:
             return
-        flow = context.user_data.get("adm_flow", "")
-        prod_id = 1 if "gmail" in flow else 2
-        session_added = context.user_data.get("session_added_count", 0)
-        context.user_data.clear()
-
-        prod = get_product_by_id(prod_id)
-        total_now = get_available_stock_count(prod_id)
-
-        if session_added >= 30 and prod:
-            await broadcast_restock_alert(prod[1], session_added, total_now, prod[2], context)
-
-        await q.answer(f"Finished! Total {session_added} items added.", show_alert=True)
+        pid = int(data.split("_")[2])
+        delete_product_by_id(pid)
+        await q.answer("Product deleted successfully!", show_alert=True)
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
+    # ৩. স্টক যোগ মেনু
+    elif data == "adm_stock_menu":
+        if user.id not in ADMIN_IDS:
+            return
+        prods = get_all_products()
+        kb = []
+        for p in prods:
+            kb.append([InlineKeyboardButton(f"📦 Add stock for {p[1]}", callback_data=f"adm_addstockto_{p[0]}")])
+        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        await send_or_edit_menu(update, context, "📦 <b>Select product to add stock:</b>", InlineKeyboardMarkup(kb))
+
+    elif data.startswith("adm_addstockto_"):
+        if user.id not in ADMIN_IDS:
+            return
+        pid = int(data.split("_")[2])
+        prod = get_product_by_id(pid)
+        context.user_data["adm_flow"] = "add_stock_items"
+        context.user_data["target_prod_id"] = pid
+        m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
+        await send_or_edit_menu(
+            update, context,
+            f"📦 <b>Adding stock for: {prod[1]}</b>\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Send the account credentials or links below.\n"
+            f"💡 <i>You can send multiple items at once (one item per line).</i>",
+            m
+        )
+
+    # ৪. ইউজার ব্যালেন্স যোগ
     elif data == "adm_credit_user":
         if user.id not in ADMIN_IDS:
             return
         context.user_data["adm_step"] = "credit_user"
-        m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_cancel")]])
+        m = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="adm_back_dash")]])
         await send_or_edit_menu(update, context, "💳 Send: <code>&lt;user_id&gt; &lt;amount&gt;</code>", m)
 
+    # ৫. আনসোল্ড স্টক ক্লিয়ার
     elif data == "adm_rm_menu":
         if user.id not in ADMIN_IDS:
             return
-        m = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗑️ Clear Unsold Gmails", callback_data="adm_clear_1")],
-            [InlineKeyboardButton("🗑️ Clear Unsold Gemini Links", callback_data="adm_clear_2")],
-            [InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")],
-        ])
-        await send_or_edit_menu(update, context, "⚠️ Select stock to purge:", m)
+        prods = get_all_products()
+        kb = []
+        for p in prods:
+            kb.append([InlineKeyboardButton(f"🗑️ Clear stock of {p[1]}", callback_data=f"adm_clear_{p[0]}")])
+        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        await send_or_edit_menu(update, context, "⚠️ Select product to purge unsold stock:", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_clear_"):
         if user.id not in ADMIN_IDS:
             return
         cnt = clear_unsold_stock(int(data.split("_")[2]))
         await q.answer(f"Purged {cnt} items.", show_alert=True)
-        t, m = build_admin_dashboard_text_and_markup()
-        await send_or_edit_menu(update, context, t, m)
-
-    elif data == "adm_cancel":
-        context.user_data.clear()
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
@@ -1592,7 +1568,7 @@ async def post_init(application):
     loop_instance = asyncio.get_running_loop()
 
 
-# ----------------- MAIN INITIALIZATION ----------------- #
+# ----------------- MAIN ----------------- #
 def main():
     global bot_app_instance
     init_db()
