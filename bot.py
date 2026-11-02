@@ -41,6 +41,9 @@ SUPPORT_USERNAME = "TrickBy_Support"
 CURRENCY_SYMBOL = "₹"
 DB_PATH = "shop_bot.db"
 
+# Base User Offset (Real user ashle eitar shathe jog hoye auto barte thakbe)
+BASE_USER_OFFSET = 1000
+
 MIN_DEPOSIT_INR = 1.0
 MIN_DEPOSIT_USDT = 0.05
 USDT_RATE_INR = 100.0
@@ -162,6 +165,19 @@ def get_all_user_ids():
     return [r[0] for r in rows]
 
 
+def get_real_user_count() -> int:
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users")
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+
+def get_display_user_count() -> int:
+    return BASE_USER_OFFSET + get_real_user_count()
+
+
 def get_user_balance(user_id: int) -> float:
     conn = get_db_connection()
     c = conn.cursor()
@@ -276,8 +292,7 @@ def get_admin_dashboard_stats():
     c.execute("SELECT COUNT(*) FROM inventory WHERE is_sold = 0")
     total_stock = c.fetchone()[0]
 
-    c.execute("SELECT COUNT(*) FROM users")
-    users = c.fetchone()[0]
+    real_users = get_real_user_count()
 
     c.execute("SELECT COALESCE(SUM(amount_credited), 0.0) FROM processed_payments")
     total_credited = c.fetchone()[0]
@@ -289,7 +304,7 @@ def get_admin_dashboard_stats():
         "t_sold": t_sold,
         "td_sold": td_sold,
         "total_stock": total_stock,
-        "users": users,
+        "users": real_users,
         "total_credited": total_credited,
         "today_date": today,
     }
@@ -672,7 +687,6 @@ def get_products_inline_keyboard():
             usdt_p = price / USDT_RATE_INR
             icon = get_product_icon(name)
             
-            # Screenshot style: [Icon] [Name] | [Price INR] • [Price USD][span_2](start_span)[span_2](end_span)
             if stock > 0:
                 button_title = f"{icon} {name} | ₹{price:.0f} • ${usdt_p:.2f}"
             else:
@@ -751,7 +765,8 @@ def build_admin_dashboard_text_and_markup():
         "👑 <b>ADMIN EXECUTIVE COMMAND CENTER</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📅 <b>Date:</b> <code>{s['today_date']}</code>\n"
-        f"👥 <b>Total Registered:</b> <code>{s['users']} users</code>\n"
+        f"👥 <b>Real Registered Users:</b> <code>{s['users']} members</code>\n"
+        f"🌐 <b>Displayed To Users:</b> <code>{s['users'] + BASE_USER_OFFSET} members</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "📦 <b>LIVE INVENTORY OVERVIEW</b>\n"
         f"{stock_breakdown or '• No active products found\n'}"
@@ -1159,8 +1174,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.callback_query.message.edit_text(join_text, reply_markup=join_markup, parse_mode="HTML")
         return
 
+    display_users = get_display_user_count()
     text = (
-        "🛒 <b>PREMIUM DIGITAL STORE</b>\n"
+        "⚡ <b>TRICK BY STORE !</b>\n"
+        f"👥 <b>Active Members:</b> <code>{display_users:,} users</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>Current Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n"
         "⚡ <i>Instant automated delivery & real-time wallet deposits.</i>\n\n"
@@ -1346,9 +1363,11 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Reply keyboard handlers
     upper_t = text.upper()
-    if "BUY PRODUCTS" in upper_t or "BUY PRODUCT" in upper_t or "PRODUCTS CATALOG" in upper_t:
+    if "BUY PRODUCTS" in upper_t or "BUY PRODUCT" in upper_t:
+        display_users = get_display_user_count()
         text_menu = (
-            "🛒 <b>PREMIUM DIGITAL STORE</b>\n"
+            "⚡ <b>TRICK BY STORE !</b>\n"
+            f"👥 <b>Active Members:</b> <code>{display_users:,} users</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💰 <b>Exchange Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n\n"
             "👇 <b>Select an item below to check details & order:</b>"
@@ -1423,8 +1442,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "back_to_menu":
+        display_users = get_display_user_count()
         text_menu = (
-            "🛒 <b>PREMIUM DIGITAL STORE</b>\n"
+            "⚡ <b>TRICK BY STORE !</b>\n"
+            f"👥 <b>Active Members:</b> <code>{display_users:,} users</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💰 <b>Exchange Rate: 1 USDT = ₹{USDT_RATE_INR:.2f}</b>\n\n"
             "👇 <b>Select an item below to check details & order:</b>"
