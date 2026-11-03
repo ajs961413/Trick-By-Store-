@@ -453,14 +453,14 @@ def format_credentials_card(raw_items):
         if "||" in item:
             acc, pwd = item.split("||", 1)
             card = (
-                f"┌─ ✨ <b>Credentials #{idx}</b>\n"
+                f"┌─ 💎 <b>Credentials #{idx}</b>\n"
                 f"├ 📧 <b>Account:</b> <code>{acc.strip()}</code>\n"
                 f"└ 🔑 <b>Password:</b> <code>{pwd.strip()}</code>"
             )
         else:
             card = (
-                f"┌─ ✨ <b>Item #{idx}</b>\n"
-                f"└ 🔑 <b>Access Data:</b> <code>{item.strip()}</code>"
+                f"┌─ 💎 <b>Credentials #{idx}</b>\n"
+                f"└ 🔑 <b>Data / Token:</b> <code>{item.strip()}</code>"
             )
         formatted_list.append(card)
     return "\n\n".join(formatted_list)
@@ -564,14 +564,14 @@ def get_force_join_card(user_first_name: str):
         "💎 <b>MEMBERSHIP VERIFICATION REQUIRED</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Welcome, <b>{html.escape(user_first_name or 'User')}</b>!\n\n"
-        "To unlock our premium marketplace and access your account, please join our official update channel.\n\n"
+        "To access our services and products, please join our official Telegram channel first.\n\n"
         f"📢 <b>Channel:</b> {CHANNEL_USERNAME}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Join the channel below and tap 'Verify Access' to unlock instantly.</i>"
+        "<i>Join the channel below and tap 'Verify Access' to unlock immediately.</i>"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Join Official Channel", url=CHANNEL_URL)],
-        [InlineKeyboardButton("✨ Verify Access", callback_data="verify_channel_join")],
+        [InlineKeyboardButton("📢 Join Channel", url=CHANNEL_URL)],
+        [InlineKeyboardButton("⚡ Verify Access", callback_data="verify_channel_join")],
     ])
     return text, markup
 
@@ -609,12 +609,12 @@ async def send_auto_payment_alert(user_id: int, amount: float, new_bal: float, r
         "✅ <b>FUNDS CREDITED SUCCESSFULLY</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 <b>Deposited:</b> <code>{CURRENCY_SYMBOL}{amount:.2f}</code>\n"
-        f"💼 <b>New Wallet Balance:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
-        f"🔖 <b>Ref Hash:</b> <code>{ref_id}</code>\n"
+        f"💼 <b>Wallet Balance:</b> <code>{CURRENCY_SYMBOL}{new_bal:.2f}</code>\n"
+        f"🔖 <b>Reference ID:</b> <code>{ref_id}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✨ <i>Your balance is now live and ready for shopping!</i>"
+        "✨ <i>Your funds are ready! Start ordering anytime.</i>"
     )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")]])
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")]])
     try:
         await bot_app_instance.bot.send_message(chat_id=user_id, text=text, reply_markup=markup, parse_mode="HTML")
     except Exception as e:
@@ -726,10 +726,10 @@ def run_http_server():
 def get_main_reply_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛍️ Browse Products")],
+            [KeyboardButton("⚡ Buy Products ⚡")],
             [KeyboardButton("💳 My Wallet"), KeyboardButton("🎁 Refer & Earn")],
             [KeyboardButton("📦 Order History"), KeyboardButton("⚡ Reseller API")],
-            [KeyboardButton("🛡️ Warranty Policy"), KeyboardButton("💬 24/7 Support")],
+            [KeyboardButton("💬 Contact Support")],
         ],
         resize_keyboard=True,
     )
@@ -739,7 +739,7 @@ def get_products_inline_keyboard():
     prods = get_all_products()
     keyboard = []
     if not prods:
-        keyboard.append([InlineKeyboardButton("⚠️ Catalog Currently Empty", callback_data="none")])
+        keyboard.append([InlineKeyboardButton("⚠️ No Products In Catalog", callback_data="none")])
     else:
         for p in prods:
             pid, name, price, _ = p
@@ -748,7 +748,7 @@ def get_products_inline_keyboard():
             icon = get_product_icon(name)
 
             if stock > 0:
-                btn_text = f"🟢 {icon} {name} | ₹{price:.0f} • ${usdt_p:.2f} ({stock} in stock)"
+                btn_text = f"🟢 {icon} {name} | ₹{price:.0f} • ${usdt_p:.2f} ({stock} In Stock)"
             else:
                 btn_text = f"🔴 {name} | ₹{price:.0f} [Out of Stock]"
 
@@ -760,13 +760,13 @@ def get_products_inline_keyboard():
 def get_quantity_keyboard(prod_id: int):
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✨ 1x", callback_data=f"selqty_{prod_id}_1"),
-            InlineKeyboardButton("✨ 2x", callback_data=f"selqty_{prod_id}_2"),
-            InlineKeyboardButton("✨ 5x", callback_data=f"selqty_{prod_id}_5"),
-            InlineKeyboardButton("✨ 10x", callback_data=f"selqty_{prod_id}_10"),
+            InlineKeyboardButton("⚡ 1x", callback_data=f"selqty_{prod_id}_1"),
+            InlineKeyboardButton("⚡ 2x", callback_data=f"selqty_{prod_id}_2"),
+            InlineKeyboardButton("⚡ 5x", callback_data=f"selqty_{prod_id}_5"),
+            InlineKeyboardButton("⚡ 10x", callback_data=f"selqty_{prod_id}_10"),
         ],
         [InlineKeyboardButton("🔢 Custom Quantity", callback_data=f"custom_qty_{prod_id}")],
-        [InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")],
     ])
 
 
@@ -774,7 +774,7 @@ def get_wallet_inline_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Instant UPI (Auto Verification)", callback_data="choose_upi_deposit")],
         [InlineKeyboardButton("💎 USDT Crypto (TRC-20 Auto)", callback_data="choose_usdt_deposit")],
-        [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")],
+        [InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")],
     ])
 
 
@@ -790,7 +790,7 @@ def get_upi_amount_selection_keyboard():
             InlineKeyboardButton("₹500", callback_data="upi_amt_500"),
             InlineKeyboardButton("₹1000", callback_data="upi_amt_1000"),
         ],
-        [InlineKeyboardButton("🔢 Enter Custom INR Amount", callback_data="upi_amt_custom")],
+        [InlineKeyboardButton("🔢 Custom INR Amount", callback_data="upi_amt_custom")],
         [InlineKeyboardButton("🔙 Cancel", callback_data="cancel_payment_flow")],
     ])
 
@@ -807,7 +807,7 @@ def get_usdt_amount_selection_keyboard():
             InlineKeyboardButton("10 USDT", callback_data="usdt_amt_10"),
             InlineKeyboardButton("25 USDT", callback_data="usdt_amt_25"),
         ],
-        [InlineKeyboardButton("🔢 Enter Custom USDT Amount", callback_data="usdt_amt_custom")],
+        [InlineKeyboardButton("🔢 Custom USDT Amount", callback_data="usdt_amt_custom")],
         [InlineKeyboardButton("🔙 Cancel", callback_data="cancel_payment_flow")],
     ])
 
@@ -819,24 +819,24 @@ def build_admin_dashboard_text_and_markup():
     for p in prods:
         c = get_available_stock_count(p[0])
         indicator = "🟢" if c > 0 else "🔴"
-        stock_breakdown += f"{indicator} <b>{p[1]}:</b> <code>{c} in stock</code> | Price: ₹{p[2]:.2f}\n"
+        stock_breakdown += f"{indicator} <b>{p[1]}:</b> <code>{c} items</code> | ₹{p[2]:.2f}\n"
 
     text = (
-        "👑 <b>CENTRAL CONTROL PANEL</b>\n"
+        "👑 <b>ADMIN CONTROL PANEL</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📅 <b>System Date:</b> <code>{s['today_date']}</code>\n"
         f"👥 <b>Total Verified Users:</b> <code>{s['users']}</code>\n"
         f"🎁 <b>Active Referral Reward:</b> <code>₹{s['ref_reward']:.2f} / invite</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📦 <b>INVENTORY STATUS</b>\n"
+        "📦 <b>INVENTORY SUMMARY</b>\n"
         f"{stock_breakdown or '• No active products configured\n'}"
-        f"💎 <b>Total Stock Available:</b> <code>{s['total_stock']} items</code>\n"
+        f"💎 <b>Total Available Stock:</b> <code>{s['total_stock']} units</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📊 <b>FINANCIAL SNAPSHOT</b>\n"
+        "📊 <b>FINANCIAL METRICS</b>\n"
         f"⚡ <b>Today's Units Sold:</b> <code>{s['td_sold']} units</code>\n"
         f"💵 <b>Today's Revenue:</b> <code>{CURRENCY_SYMBOL}{s['td_rev']:.2f}</code>\n"
-        f"📦 <b>Lifetime Units Sold:</b> <code>{s['t_sold']} units</code>\n"
-        f"💰 <b>Lifetime Sales Revenue:</b> <code>{CURRENCY_SYMBOL}{s['t_rev']:.2f}</code>\n"
+        f"📦 <b>Total Units Sold:</b> <code>{s['t_sold']} units</code>\n"
+        f"💰 <b>Total Sales Revenue:</b> <code>{CURRENCY_SYMBOL}{s['t_rev']:.2f}</code>\n"
         f"💳 <b>Total Wallet Credited:</b> <code>{CURRENCY_SYMBOL}{s['total_credited']:.2f}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
@@ -851,14 +851,14 @@ def build_admin_dashboard_text_and_markup():
         ],
         [
             InlineKeyboardButton("📥 Add Stock (1-by-1)", callback_data="adm_stock_menu"),
-            InlineKeyboardButton("🧹 Purge Stock", callback_data="adm_rm_menu"),
+            InlineKeyboardButton("🧹 Clear Stock", callback_data="adm_rm_menu"),
         ],
         [
             InlineKeyboardButton("💳 Credit User Balance", callback_data="adm_credit_user"),
             InlineKeyboardButton("🔄 Refresh Data", callback_data="adm_refresh_stats"),
         ],
         [
-            InlineKeyboardButton("❌ Exit Panel", callback_data="adm_close"),
+            InlineKeyboardButton("❌ Close Panel", callback_data="adm_close"),
         ],
     ])
     return text, markup
@@ -911,13 +911,13 @@ async def render_refer_view(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         f"• <b>Pending Verification:</b> <code>{pending} users</code>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🛡️ <b>Anti-Cheat Rules:</b>\n"
-        "1. Referees must be genuine, new Telegram accounts.\n"
-        "2. The bonus is automatically released when your invite joins our official channel.\n"
-        "3. Self-referrals and multiple fake accounts are permanently blocked."
+        "1. Invited users must be new Telegram accounts.\n"
+        "2. The bonus will be credited once your referee verifies channel membership.\n"
+        "3. Self-referrals and bypass attempts are permanently blocked."
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📤 Share Link Directly", url=f"https://t.me/share/url?url={urllib.parse.quote(refer_link)}&text={urllib.parse.quote('Join Trick By Store for premium digital accounts and services!')}")],
-        [InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")],
     ])
     await send_or_edit_menu(update, context, text, markup)
 
@@ -948,40 +948,25 @@ async def render_api_view(update: Update, context: ContextTypes.DEFAULT_TYPE, us
             InlineKeyboardButton("💳 Add Balance", callback_data="add_funds_menu"),
             InlineKeyboardButton("🔄 Regenerate Key", callback_data="api_regenerate"),
         ],
-        [InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")],
     ])
     await send_or_edit_menu(update, context, api_doc, markup)
 
 
-async def render_recovery_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rec_text = (
-        "🛡️ <b>REPLACEMENT & WARRANTY POLICIES</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "• <b>Fresh Stock Guarantee:</b> Every credential is verified prior to dispatch.\n"
-        "• <b>Security Notice:</b> Please update account security data and attach 2FA upon delivery.\n"
-        "• <b>Claim Procedure:</b> Report login issues within warranty timeframe to support with proof."
-    )
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Open Support Chat", url=f"https://t.me/{SUPPORT_USERNAME}")],
-        [InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")],
-    ])
-    await send_or_edit_menu(update, context, rec_text, markup)
-
-
 async def render_support_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sup_text = (
-        "💬 <b>24/7 PRIORITY SUPPORT DESK</b>\n"
+        "💬 <b>24/7 CUSTOMER SUPPORT & HELP DESK</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Need instant help with deposits, balances, or order deliveries?\n\n"
+        "Need instant help with deposits, balances, or orders?\n\n"
         f"📢 <b>Official Updates:</b> {CHANNEL_USERNAME}\n"
-        f"👤 <b>Live Help Desk:</b> @{SUPPORT_USERNAME}\n"
+        f"👤 <b>Live Admin Support:</b> @{SUPPORT_USERNAME}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<i>Our operators are available 24/7 to assist your inquiries.</i>"
+        "<i>Click below to open a direct chat with our support team.</i>"
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 Chat with Admin", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [InlineKeyboardButton("📢 Official Channel", url=CHANNEL_URL)],
-        [InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")],
     ])
     await send_or_edit_menu(update, context, sup_text, markup)
 
@@ -993,9 +978,9 @@ async def render_orders_view(update: Update, context: ContextTypes.DEFAULT_TYPE,
             "📦 <b>ORDER ARCHIVE</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "<i>No order history recorded on this account yet.</i>\n\n"
-            "All fulfilled accounts and secret keys will remain securely stored here."
+            "All fulfilled accounts and items will remain securely saved here."
         )
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")]])
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")]])
         await send_or_edit_menu(update, context, empty_text, markup)
         return
 
@@ -1012,7 +997,7 @@ async def render_orders_view(update: Update, context: ContextTypes.DEFAULT_TYPE,
         )
     out += "💡 <i>Tap any credentials code block to copy instantly.</i>"
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛍️ Continue Shopping", callback_data="back_to_menu")],
+        [InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")],
         [InlineKeyboardButton("💬 Support Desk", url=f"https://t.me/{SUPPORT_USERNAME}")],
     ])
     await send_or_edit_menu(update, context, out, markup)
@@ -1059,7 +1044,7 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "💡 <i>Tap any credential to copy it instantly.</i>"
                             )
-                            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Continue Shopping", callback_data="back_to_menu")]])
+                            markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")]])
                             try:
                                 await context.bot.delete_message(chat_id=user_id, message_id=message_id)
                             except Exception:
@@ -1078,7 +1063,7 @@ async def auto_poll_payment_status(order_id: str, user_id: int, amount: float, m
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "✨ <i>Your wallet balance is updated! Happy shopping!</i>"
                     )
-                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")]])
+                    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")]])
                     try:
                         await context.bot.delete_message(chat_id=user_id, message_id=message_id)
                     except Exception:
@@ -1201,7 +1186,7 @@ async def show_payment_options_for_order(update: Update, context: ContextTypes.D
             update,
             context,
             f"⚠️ <b>Inventory Notice:</b>\nRequested: {qty} unit(s) | Available: {stock} unit(s).",
-            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Catalog", callback_data="back_to_menu")]]),
+            InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_to_menu")]]),
         )
         return
 
@@ -1245,7 +1230,7 @@ async def execute_balance_checkout(update: Update, context: ContextTypes.DEFAULT
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "💡 <i>Tap any credential above to copy directly to your clipboard.</i>"
     )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛍️ Continue Shopping", callback_data="back_to_menu")]])
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")]])
     await send_or_edit_menu(update, context, msg, markup)
 
 
@@ -1254,7 +1239,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     context.user_data.clear()
 
-    # Parse potential referral ID
     referrer_id = None
     if context.args and len(context.args) > 0:
         arg = context.args[0]
@@ -1275,7 +1259,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.callback_query.message.edit_text(join_text, reply_markup=join_markup, parse_mode="HTML")
         return
 
-    # Trigger reward if new user joins channel
     ref_parent, rew_amt = try_reward_referrer(user.id)
     if ref_parent and bot_app_instance:
         try:
@@ -1326,7 +1309,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if val < MIN_DEPOSIT_INR:
                 markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔢 Try Again", callback_data="upi_amt_custom")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="cancel_payment_flow")],
+                    [InlineKeyboardButton("🔙 Cancel", callback_data="cancel_payment_flow")],
                 ])
                 await update.message.reply_text(f"⚠️ Minimum deposit is {CURRENCY_SYMBOL}{MIN_DEPOSIT_INR:.2f}.", reply_markup=markup, parse_mode="HTML")
                 return
@@ -1344,7 +1327,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if val < MIN_DEPOSIT_USDT:
                 markup = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔢 Try Again", callback_data="usdt_amt_custom")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="cancel_payment_flow")],
+                    [InlineKeyboardButton("🔙 Cancel", callback_data="cancel_payment_flow")],
                 ])
                 await update.message.reply_text(f"⚠️ Minimum deposit is {MIN_DEPOSIT_USDT:.2f} USDT.", reply_markup=markup, parse_mode="HTML")
                 return
@@ -1362,7 +1345,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pid = context.user_data.get("target_prod_id")
             update_product_price(pid, new_p)
             context.user_data.clear()
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Dashboard", callback_data="adm_back_dash")]])
             await update.message.reply_text(f"✅ <b>Price Updated Successfully!</b>\nNew Price: ₹{new_p:.2f}", reply_markup=markup, parse_mode="HTML")
             return
         except ValueError:
@@ -1375,7 +1358,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             val = float(text)
             set_referral_reward(val)
             context.user_data.clear()
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Dashboard", callback_data="adm_back_dash")]])
             await update.message.reply_text(f"✅ <b>Referral Bonus Updated!</b>\nNew Bonus: ₹{val:.2f} per verified invite.", reply_markup=markup, parse_mode="HTML")
             return
         except ValueError:
@@ -1414,7 +1397,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
         pid = add_new_product(name, price, desc)
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Dashboard", callback_data="adm_back_dash")]])
         await update.message.reply_text(
             f"🎉 <b>Product Registered Successfully!</b>\n\n"
             f"🆔 <b>ID:</b> #{pid}\n"
@@ -1483,7 +1466,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 credit_val = float(p[1])
                 add_user_balance(target_uid, credit_val)
                 bal = get_user_balance(target_uid)
-                markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Back to Dashboard", callback_data="adm_back_dash")]])
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("👑 Dashboard", callback_data="adm_back_dash")]])
                 await update.message.reply_text(f"✅ Credited {CURRENCY_SYMBOL}{credit_val:.2f} to {target_uid}.\nUpdated Balance: {CURRENCY_SYMBOL}{bal:.2f}", reply_markup=markup, parse_mode="HTML")
             except ValueError:
                 await update.message.reply_text("❌ Invalid numerical amount provided.", parse_mode="HTML")
@@ -1502,7 +1485,7 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Reply keyboard handlers
     upper_t = text.upper()
-    if "BROWSE PRODUCTS" in upper_t or "BUY PRODUCT" in upper_t or "BUY PRODUCTS" in upper_t:
+    if "BUY PRODUCT" in upper_t or "BUY PRODUCTS" in upper_t:
         text_menu = (
             "⚡ <b>CATALOG OVERVIEW</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1517,14 +1500,11 @@ async def reply_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "REFER & EARN" in upper_t or "REFER" in upper_t:
         await render_refer_view(update, context, user.id)
 
-    elif "RESELLER API" in upper_t or "DEVELOPER API" in upper_t or "API" in upper_t:
+    elif "RESELLER API" in upper_t or "API" in upper_t:
         await render_api_view(update, context, user.id)
 
     elif "ORDER HISTORY" in upper_t or "MY ORDERS" in upper_t:
         await render_orders_view(update, context, user.id)
-
-    elif "WARRANTY POLICY" in upper_t or "RECOVERY" in upper_t:
-        await render_recovery_view(update, context)
 
     elif "SUPPORT" in upper_t:
         await render_support_view(update, context)
@@ -1546,7 +1526,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await q.message.delete()
             except Exception:
                 pass
-            # Trigger referral payout if qualified
             ref_parent, rew_amt = try_reward_referrer(user.id)
             if ref_parent and bot_app_instance:
                 try:
@@ -1578,7 +1557,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 View Wallet", callback_data="back_to_wallet")],
-            [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")],
+            [InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")],
         ])
         await context.bot.send_message(chat_id=user.id, text="❌ <b>Transaction Cancelled.</b>", reply_markup=markup, parse_mode="HTML")
         return
@@ -1587,7 +1566,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 View Wallet", callback_data="back_to_wallet")],
-            [InlineKeyboardButton("🛍️ Browse Products", callback_data="back_to_menu")],
+            [InlineKeyboardButton("⚡ Buy Products", callback_data="back_to_menu")],
         ])
         await send_or_edit_menu(update, context, "❌ <b>Transaction Cancelled.</b>", markup)
         return
@@ -1716,7 +1695,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for p in prods:
             kb.append([InlineKeyboardButton(f"💲 {p[1]} (₹{p[2]:.2f})", callback_data=f"adm_editprice_{p[0]}")])
-        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        kb.append([InlineKeyboardButton("🔙 Dashboard", callback_data="adm_back_dash")])
         await send_or_edit_menu(update, context, "💲 <b>Select a product to update its price:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_editprice_"):
@@ -1741,7 +1720,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for p in prods:
             kb.append([InlineKeyboardButton(f"🗑️ Delete {p[1]}", callback_data=f"adm_delprod_{p[0]}")])
-        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        kb.append([InlineKeyboardButton("🔙 Dashboard", callback_data="adm_back_dash")])
         await send_or_edit_menu(update, context, "⚠️ <b>Select a single product to remove:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_delprod_"):
@@ -1760,7 +1739,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = []
         for p in prods:
             kb.append([InlineKeyboardButton(f"📥 Add Stock to {p[1]}", callback_data=f"adm_addstockto_{p[0]}")])
-        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
+        kb.append([InlineKeyboardButton("🔙 Dashboard", callback_data="adm_back_dash")])
         await send_or_edit_menu(update, context, "📦 <b>Select product to add credentials:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_addstockto_"):
@@ -1792,15 +1771,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prods = get_all_products()
         kb = []
         for p in prods:
-            kb.append([InlineKeyboardButton(f"🗑️ Purge {p[1]} Stock", callback_data=f"adm_clear_{p[0]}")])
-        kb.append([InlineKeyboardButton("🔙 Back to Dashboard", callback_data="adm_back_dash")])
-        await send_or_edit_menu(update, context, "⚠️ <b>Select product to purge unsold stock:</b>", InlineKeyboardMarkup(kb))
+            kb.append([InlineKeyboardButton(f"🧹 Clear {p[1]} Stock", callback_data=f"adm_clear_{p[0]}")])
+        kb.append([InlineKeyboardButton("🔙 Dashboard", callback_data="adm_back_dash")])
+        await send_or_edit_menu(update, context, "⚠️ <b>Select product to clear unsold stock:</b>", InlineKeyboardMarkup(kb))
 
     elif data.startswith("adm_clear_"):
         if user.id not in ADMIN_IDS:
             return
         cnt = clear_unsold_stock(int(data.split("_")[2]))
-        await q.answer(f"Purged {cnt} items.", show_alert=True)
+        await q.answer(f"Cleared {cnt} items.", show_alert=True)
         t, m = build_admin_dashboard_text_and_markup()
         await send_or_edit_menu(update, context, t, m)
 
@@ -1847,4 +1826,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-a
