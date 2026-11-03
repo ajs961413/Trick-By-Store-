@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trick By Store</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body {
+      background-color: #0d1117;
+      font-family: Arial, sans-serif;
+      padding: 15px;
+      color: #ffffff;
+      margin: 0;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .user-badge {
+      display: inline-block;
+      background-color: #1f2937;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      color: #9ca3af;
+      margin-top: 5px;
+    }
+    .section-title {
+      font-size: 14px;
+      color: #9ca3af;
+      margin: 15px 0 8px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      margin-bottom: 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: bold;
+      color: #ffffff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    /* Green Product Buttons */
+    .btn-green {
+      background-color: #22c55e;
+    }
+    /* Blue Action Buttons */
+    .btn-blue {
+      background-color: #0284c7;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h2 style="margin: 0;">⚡ Trick By Store!</h2>
+    <div class="user-badge">
+      👥 <span id="userCount">1,050</span> monthly users
+    </div>
+  </div>
+
+  <div class="section-title">Products</div>
+  <button class="btn btn-green">🛒 ADOBE EXPRESS 12M · ₹15 = 0.15 USDT</button>
+  <button class="btn btn-green">🛒 Apple music 6M · ₹70 = 0.70 USDT</button>
+  <button class="btn btn-green">🛒 Adobe Express 12M (ReadyMade ID) · ₹65</button>
+
+  <div class="section-title">Menu</div>
+  <button class="btn btn-green">🛒 Buy Coupon</button>
+  <button class="btn btn-green">💰 My Wallet</button>
+
+  <div class="grid-2">
+    <button class="btn btn-blue">📑 Recovery</button>
+    <button class="btn btn-blue">📜 Terms and Conditions</button>
+  </div>
+  <button class="btn btn-blue" style="margin-top: 10px;">🔗 API</button>
+
+  <script>
+    // Initialize Telegram WebApp
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
+    // Trick Counter Logic: 1050 theke count shuru hobe
+    let baseCount = 1050;
+    let storedVisits = localStorage.getItem('store_visits') || 0;
+    storedVisits = parseInt(storedVisits) + 1;
+    localStorage.setItem('store_visits', storedVisits);
+
+    let totalUsers = baseCount + storedVisits;
+    document.getElementById('userCount').innerText = totalUsers.toLocaleString();
+  </script>
+
+</body>
+</html>
